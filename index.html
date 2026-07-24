@@ -1186,7 +1186,7 @@
         const key = field.dataset.category;
         const card = field.closest(".category");
 
-        const showSummaryHoverPreview = (event) => {
+        const showSummaryPreview = (event) => {
           const entries = summarySourceMap[key] || [];
           if (!entries.length) return;
 
@@ -1209,10 +1209,8 @@
           card?.classList.add("summary-active");
         };
 
-        card?.addEventListener("mousemove", showSummaryHoverPreview);
-        card?.addEventListener("mouseenter", showSummaryHoverPreview);
-        card?.addEventListener("mouseleave", hideSummaryHoverPreview);
-        field.addEventListener("mouseleave", hideSummaryHoverPreview);
+        card?.addEventListener("click", showSummaryPreview);
+        field.addEventListener("click", showSummaryPreview);
         field.addEventListener("blur", hideSummaryHoverPreview);
       });
     }
