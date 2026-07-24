@@ -1153,21 +1153,33 @@
       const normalizedText = text.replace(/\s+/g, " ").trim();
       if (!normalizedText) return "No transcript available yet.";
 
-      const symptomWords = ["pain", "fever", "cough", "rash", "swelling", "bleeding", "fatigue", "weakness", "headache", "chest", "abdominal", "nausea", "vomiting", "diarrhea", "dizziness", "shortness of breath"];
-      const foundSymptoms = symptomWords.filter((word) => new RegExp(`\\b${word}\\b`, "i").test(normalizedText));
-      const durationMatch = normalizedText.match(/\b(\d+\s*(days?|weeks?|months?|years?|hours?|minutes?))\b/i);
-      const improvementMatch = normalizedText.match(/\b(not improving|improving|worsening|worse|not getting better|get better|get worse)\b/i);
+      const complaintField = els.mainComplaints?.value || "";
+      const allergyField = els.allergies?.value || "";
+      const timeframeField = els.timeframe?.value || "";
 
-      if (foundSymptoms.length) {
-        const symptomPhrase = foundSymptoms.join(" and ");
-        const durationText = durationMatch ? `for ${durationMatch[1]}` : "";
-        const improvementText = improvementMatch ? `, ${improvementMatch[1]}` : "";
-        return `Patient reports ${symptomPhrase}${durationText ? ` ${durationText}` : ""}${improvementText}`.trim();
-      }
+      const complaints = complaintField
+        .split(/\n/)
+        .map((line) => line.replace(/^•\s*/, "").trim())
+        .filter(Boolean)
+        .slice(0, 3);
 
-      const relevant = sentences.filter((sentence) => /pain|fever|cough|allergy|allergies|history|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|nausea|vomiting|diarrhea|shortness of breath|dizzy|not improving|improving|worsening|weeks|days|months|years|today|yesterday|last night|this morning/i.test(sentence));
-      const fallback = (relevant[0] || sentences[0] || "").replace(/\s+/g, " ").trim();
-      return fallback.length > 100 ? fallback.split(/\s+/).slice(0, 14).join(" ") : fallback;
+      const allergies = allergyField
+        .split(/\n/)
+        .map((line) => line.replace(/^•\s*/, "").trim())
+        .filter(Boolean)
+        .slice(0, 3);
+
+      const timeframe = timeframeField
+        .split(/\n/)
+        .map((line) => line.replace(/^•\s*/, "").trim())
+        .filter(Boolean)
+        .slice(0, 3);
+
+      const complaintText = complaints.length ? complaints.join(", ") : "symptoms";
+      const allergyText = allergies.length ? allergies.join(", ") : "no known allergies";
+      const timeframeText = timeframe.length ? timeframe.join(", ") : "unknown duration";
+
+      return `Patient complained ${complaintText}, with ${allergyText}, for ${timeframeText}`.trim();
     }
 
     function shortenSummaryText(text, bucket) {
