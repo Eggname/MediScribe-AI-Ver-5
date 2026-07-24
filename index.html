@@ -380,6 +380,35 @@
       box-shadow: none;
     }
 
+    .category.summary-active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.16);
+    }
+
+    .summary-hover-hint {
+      position: fixed;
+      z-index: 2000;
+      max-width: min(320px, calc(100vw - 24px));
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #f8fafc;
+      font-size: 0.9rem;
+      line-height: 1.45;
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.2);
+      pointer-events: none;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(4px);
+      transition: opacity 120ms ease, transform 120ms ease;
+    }
+
+    .summary-hover-hint.show {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+    }
+
     .history {
       display: grid;
       gap: 10px;
@@ -610,6 +639,7 @@
             <textarea id="otherKeynotes" data-category="otherKeynotes"></textarea>
           </article>
         </div>
+        <div id="summaryHoverHint" class="summary-hover-hint" aria-live="polite"></div>
         <div class="actions" style="margin-top: 14px;">
           <button id="saveBtn" type="button">Save note</button>
         </div>
@@ -679,6 +709,7 @@
     let msalApp = null;
     let msalLoadPromise = null;
     let notesCache = [];
+    let summarySourceMap = {};
 
     const categoryFields = [
       ["familyHistory", els.familyHistory],
@@ -1069,24 +1100,41 @@
       return matches ? matches.map((part) => part.trim()).filter(Boolean) : [];
     }
 
-    function uniqueLines(items) {
-      return [...new Set(items.map((item) => item.trim()).filter(Boolean))].join("\n");
+    function formatSummaryItems(items) {
+      const uniqueItems = [...new Set(items.map((item) => item.summary.trim()).filter(Boolean))];
+      const entryItems = uniqueItems.map((summary) => {
+        const sourceEntry = items.find((item) => item.summary.trim() === summary);
+        return {
+          summary,
+          source: sourceEntry ? sourceEntry.source : summary
+        };
+      });
+
+      const displayText = entryItems.length
+        ? entryItems.map((item) => `• ${item.summary}`).join("\n")
+        : "• Not specified";
+
+      return { displayText, entries: entryItems };
     }
 
     function shortenSummaryText(text, bucket) {
       let phrase = text
         .replace(/\s+/g, " ")
         .replace(/^[^a-z0-9]+/i, "")
+        .replace(/[.?!]+$/g, "")
         .trim();
 
       phrase = phrase
         .replace(/^(patient|the patient|he|she|his|her)\s+/i, "")
-        .replace(/^(complains of|complaint of|complained of|reports|states|has|had|presents with|presenting with|suffering from|is experiencing|experiencing)\s+/i, "")
-        .replace(/^(family history of|history of|allergies to|allergy to|allergic to|reaction to)\s+/i, "")
+        .replace(/^(complains of|complaint of|complained of|reports|states|has|had|is having|have|was having|presents with|presenting with|suffering from|is experiencing|experiencing)\s+/i, "")
+        .replace(/^(family history of|history of|allergies to|allergy to|allergic to|reaction to|symptoms of|symptom of)\s+/i, "")
         .replace(/^(main complaint|complaint|symptoms|symptom)\s+/i, "")
-        .replace(/^(for|since|started|began|onset|duration)\s+/i, "")
+        .replace(/^(for|since|started|began|onset|duration|it has already started|already started)\s+/i, "")
+        .replace(/\b(?:and it has|and has|it has|it is|it was)\b/gi, "")
+        .replace(/\b(?:not reduced|not improved|not getting better|has not reduced|has not improved|has not gotten better|getting worse|worsening)\b/gi, "not improving")
         .replace(/\b(?:for|since)\s+\d+\s*(days?|weeks?|months?|years?|hours?|minutes?)\b.*$/i, "")
-        .replace(/\b(?:today|yesterday|last night|this morning)\b.*$/i, "")
+        .replace(/\b(?:today|yesterday|last night|this morning|ago)\b.*$/i, "")
+        .replace(/\b(?:started|began)\b\s+/i, "started ")
         .replace(/^(to|of|with)\s+/i, "")
         .replace(/\s+/g, " ")
         .trim();
@@ -1099,7 +1147,7 @@
           const rest = phrase.replace(/^(mother|father|parent|sibling|brother|sister|grandparent)\b\s*(has|have)?\s*(a\s*)?(history of)?\s*/i, "").trim();
           return rest ? `${familyMatch[1]}: ${rest}` : `${familyMatch[1]} history`;
         }
-        return phrase.replace(/^(family history|history)\s+/i, "").trim();
+        return phrase.replace(/^(family history|history)\s+/i, "").replace(/^of\s+/i, "").trim();
       }
 
       if (bucket === "allergies") {
@@ -1108,14 +1156,57 @@
 
       if (bucket === "timeframe") {
         const timeframeMatch = phrase.match(/\b(?:for|since)?\s*(\d+\s*(days?|weeks?|months?|years?|hours?|minutes?)|today|yesterday|last night|this morning)\b/i);
-        return timeframeMatch ? timeframeMatch[0].trim() : phrase;
+        if (timeframeMatch) {
+          const duration = timeframeMatch[0].trim();
+          return duration.length > 30 ? duration.split(/\s+/).slice(0, 4).join(" ") : duration;
+        }
+        if (/not improving/i.test(phrase)) return "Not improving";
+        if (/improving/i.test(phrase)) return "Improving";
+        if (/worsening|worse/i.test(phrase)) return "Worsening";
+        return phrase.length > 45 ? phrase.split(/\s+/).slice(0, 6).join(" ") : phrase;
       }
 
       if (bucket === "mainComplaints") {
-        return phrase.replace(/^(pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest pain|abdominal pain|shortness of breath|nausea|vomiting|diarrhea|dizziness)\b/i, "$1").trim();
+        return phrase.length > 45 ? phrase.split(/\s+/).slice(0, 6).join(" ") : phrase;
       }
 
-      return phrase.length > 80 ? phrase.split(/\s+/).slice(0, 10).join(" ") : phrase;
+      return phrase.length > 60 ? phrase.split(/\s+/).slice(0, 6).join(" ") : phrase;
+    }
+
+    function setupSummaryHoverPreview() {
+      const hoverHint = document.getElementById("summaryHoverHint");
+
+      const hideSummaryHoverPreview = () => {
+        hoverHint.classList.remove("show");
+        hoverHint.textContent = "";
+        document.querySelectorAll(".category.summary-active").forEach((card) => card.classList.remove("summary-active"));
+      };
+
+      categoryFields.forEach(([, field]) => {
+        const key = field.dataset.category;
+        field.addEventListener("mousemove", (event) => {
+          const entries = summarySourceMap[key] || [];
+          const lineHeight = parseFloat(getComputedStyle(field).lineHeight) || 22;
+          const rect = field.getBoundingClientRect();
+          const relativeY = event.clientY - rect.top;
+          const lineIndex = Math.max(0, Math.min(entries.length - 1, Math.floor(relativeY / lineHeight)));
+
+          if (!entries.length || !entries[lineIndex]) {
+            hideSummaryHoverPreview();
+            return;
+          }
+
+          const entry = entries[lineIndex];
+          hoverHint.innerHTML = `<strong>Source:</strong><br>${entry.source}`;
+          hoverHint.classList.add("show");
+          hoverHint.style.left = `${Math.min(window.innerWidth - 240, event.clientX + 12)}px`;
+          hoverHint.style.top = `${Math.min(window.innerHeight - 90, event.clientY + 12)}px`;
+          field.closest(".category")?.classList.add("summary-active");
+        });
+
+        field.addEventListener("mouseleave", hideSummaryHoverPreview);
+        field.addEventListener("blur", hideSummaryHoverPreview);
+      });
     }
 
     function categoriseTranscript() {
@@ -1143,20 +1234,20 @@
         for (const [bucket, regex] of rules) {
           if (regex.test(sentence)) {
             const concise = shortenSummaryText(sentence, bucket);
-            if (concise) buckets[bucket].push(concise);
+            if (concise) buckets[bucket].push({ summary: concise, source: sentence });
             matched = true;
           }
         }
         if (!matched) {
           const concise = shortenSummaryText(sentence, "otherKeynotes");
-          if (concise) buckets.otherKeynotes.push(concise);
+          if (concise) buckets.otherKeynotes.push({ summary: concise, source: sentence });
         }
       }
 
       for (const [key, field] of categoryFields) {
-        if (!field.value.trim()) {
-          field.value = uniqueLines(buckets[key]) || "Not specified";
-        }
+        const rendered = formatSummaryItems(buckets[key]);
+        field.value = rendered.displayText;
+        summarySourceMap[key] = rendered.entries;
       }
     }
 
@@ -1172,6 +1263,7 @@
       speechPunctuationState.timer = null;
       draftCreatedAt = null;
       lastTranscriptForCategories = "";
+      summarySourceMap = {};
       els.transcriptInput.value = "";
       els.createdStamp.textContent = "Not started";
       els.updatedStamp.textContent = "No edits yet";
