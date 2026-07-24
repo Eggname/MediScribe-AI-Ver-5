@@ -672,6 +672,7 @@
       lastChunkAt: null,
       pendingText: "",
       lastFinalText: "",
+      lastChunkText: "",
       timer: null
     };
     let msalApp = null;
@@ -867,6 +868,10 @@
       els.updatedStamp.textContent = formatDateTime(new Date().toISOString());
     }
 
+    function escapeRegExp(value) {
+      return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
     function applySpeechPunctuation(text) {
       if (!text) return "";
 
@@ -878,13 +883,13 @@
 
       const lower = formatted.toLowerCase();
       const hasExistingPunctuation = /[.!?,;:]/.test(formatted);
-      const looksLikeList = /\b(and|plus|with|also|then)\b/i.test(lower);
       const hasMedicalContext = /\b(patient|history|symptoms|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b/i.test(lower);
       const wordCount = formatted.split(/\s+/).filter(Boolean).length;
 
-      if (!hasExistingPunctuation && hasMedicalContext) {
-        if (looksLikeList && wordCount >= 3) {
-          formatted += ",";
+      if (!hasExistingPunctuation && hasMedicalContext && wordCount >= 3) {
+        const listParts = formatted.split(/\s+(?:and|plus)\s+/i);
+        if (listParts.length >= 3) {
+          formatted = listParts.join(", ");
         }
       }
 
@@ -903,15 +908,33 @@
       const wordCount = words.length;
       const lower = cleaned.toLowerCase();
       const hasMedicalContext = /\b(patient|history|symptoms|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b/i.test(lower);
-      const hasClearEnding = /\b(and|with|for|has|had|was|were|is|are|started|began|since|after|before|today|yesterday|this morning|last night)\b/i.test(lower) || /\b(complains|complaint|history|symptoms|allergies|medication|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal)\b/i.test(lower);
-      const hasTooManyStopWords = /(and|the|of|to|for|with|in|on|at|a|an)\s+$/i.test(lower);
-      const confidenceScore = Math.min(1, (wordCount / 8) * 0.6 + (hasMedicalContext ? 0.25 : 0) + (hasClearEnding ? 0.15 : 0));
+      const looksLikeSentence = /\b(has|had|was|were|is|are|says|reported|complains|presents|presenting|started|began|since|for|with|after|before|today|yesterday|this morning|last night)\b/i.test(lower);
+      const hasClearEnding = /\b(complains|complaint|history|symptoms|allergies|medication|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal)\b/i.test(lower);
+      const hasTooManyStopWords = /\b(and|the|of|to|for|with|in|on|at|a|an)\s+$/i.test(lower);
+      const hasStrongClause = (wordCount >= 6 && hasMedicalContext && hasClearEnding) || (wordCount >= 7 && hasMedicalContext && looksLikeSentence);
 
-      if (!hasExistingPunctuation && hasMedicalContext && wordCount >= 5 && confidenceScore >= 0.7 && !hasTooManyStopWords) {
+      if (!hasExistingPunctuation && hasStrongClause && !hasTooManyStopWords) {
         return `${cleaned}.`;
       }
 
       return cleaned;
+    }
+
+    function buildTranscriptWithChunk(chunkText) {
+      const existingValue = els.transcriptInput.value.trim();
+      const nextChunk = applySpeechPunctuation(chunkText);
+      return existingValue ? `${existingValue} ${nextChunk}` : nextChunk;
+    }
+
+    function replaceLastChunk(chunkText) {
+      const currentValue = els.transcriptInput.value.trim();
+      const previousChunk = speechPunctuationState.lastChunkText ? speechPunctuationState.lastChunkText.trim() : "";
+      if (!previousChunk || !currentValue.endsWith(previousChunk)) {
+        return currentValue;
+      }
+
+      const prefix = currentValue.slice(0, currentValue.length - previousChunk.length).trimEnd();
+      return prefix ? `${prefix} ${chunkText}` : chunkText;
     }
 
     function scheduleSpeechPunctuationUpdate() {
@@ -920,11 +943,14 @@
       }
 
       speechPunctuationState.timer = window.setTimeout(() => {
-        const nextValue = finalizeSpeechPunctuation(speechPunctuationState.pendingText || els.transcriptInput.value);
-        if (nextValue !== els.transcriptInput.value.trim()) {
-          els.transcriptInput.value = nextValue;
-          ensureDraftTime();
-          categoriseTranscript();
+        const finalizedChunk = finalizeSpeechPunctuation(speechPunctuationState.lastChunkText || "");
+        if (finalizedChunk !== speechPunctuationState.lastChunkText.trim()) {
+          const nextValue = replaceLastChunk(finalizedChunk);
+          if (nextValue !== els.transcriptInput.value.trim()) {
+            els.transcriptInput.value = nextValue;
+            ensureDraftTime();
+            categoriseTranscript();
+          }
         }
       }, 800);
     }
@@ -960,10 +986,13 @@
         if (speechPunctuationState.timer) {
           window.clearTimeout(speechPunctuationState.timer);
         }
-        const finalValue = finalizeSpeechPunctuation(speechPunctuationState.pendingText || els.transcriptInput.value);
-        if (finalValue !== els.transcriptInput.value.trim()) {
-          els.transcriptInput.value = finalValue;
-          ensureDraftTime();
+        const finalizedChunk = finalizeSpeechPunctuation(speechPunctuationState.lastChunkText || "");
+        if (finalizedChunk !== speechPunctuationState.lastChunkText.trim()) {
+          const nextValue = replaceLastChunk(finalizedChunk);
+          if (nextValue !== els.transcriptInput.value.trim()) {
+            els.transcriptInput.value = nextValue;
+            ensureDraftTime();
+          }
         }
         categoriseTranscript();
       };
@@ -985,16 +1014,15 @@
         }
 
         if (finalText) {
-          const existingValue = els.transcriptInput.value.trim();
           const cleanedFinal = finalText.trim();
           const now = Date.now();
 
           speechPunctuationState.lastChunkAt = now;
           speechPunctuationState.lastFinalText = cleanedFinal;
-          speechPunctuationState.pendingText = `${existingValue}${existingValue ? " " : ""}${cleanedFinal}`.trim();
+          speechPunctuationState.lastChunkText = cleanedFinal;
+          speechPunctuationState.pendingText = buildTranscriptWithChunk(cleanedFinal);
 
-          const nextValue = applySpeechPunctuation(speechPunctuationState.pendingText);
-          els.transcriptInput.value = nextValue;
+          els.transcriptInput.value = speechPunctuationState.pendingText;
           ensureDraftTime();
           categoriseTranscript();
           scheduleSpeechPunctuationUpdate();
@@ -1061,6 +1089,7 @@
       speechPunctuationState.lastChunkAt = null;
       speechPunctuationState.pendingText = "";
       speechPunctuationState.lastFinalText = "";
+      speechPunctuationState.lastChunkText = "";
       speechPunctuationState.timer = null;
       draftCreatedAt = null;
       lastTranscriptForCategories = "";
