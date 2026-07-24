@@ -668,6 +668,12 @@
     let isRecording = false;
     let draftCreatedAt = null;
     let lastTranscriptForCategories = "";
+    let speechPunctuationState = {
+      lastChunkAt: null,
+      pendingText: "",
+      lastFinalText: "",
+      timer: null
+    };
     let msalApp = null;
     let msalLoadPromise = null;
     let notesCache = [];
@@ -869,9 +875,58 @@
       formatted = formatted.replace(/\bcomma\b/gi, ",");
       formatted = formatted.replace(/\b(question\s+mark|questionmark)\b/gi, "?");
       formatted = formatted.replace(/\b(new\s+line|new\s+paragraph)\b/gi, "\n");
+
+      const lower = formatted.toLowerCase();
+      const hasExistingPunctuation = /[.!?,;:]/.test(formatted);
+      const looksLikeList = /\b(and|plus|with|also|then)\b/i.test(lower);
+      const hasMedicalContext = /\b(patient|history|symptoms|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b/i.test(lower);
+      const wordCount = formatted.split(/\s+/).filter(Boolean).length;
+
+      if (!hasExistingPunctuation && hasMedicalContext) {
+        if (looksLikeList && wordCount >= 3) {
+          formatted += ",";
+        }
+      }
+
       formatted = formatted.replace(/([a-z0-9])\s+(?=(?:the|this|patient|symptoms|history|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b)/gi, "$1. ");
       formatted = formatted.replace(/\b(?:and|plus)\s+(?=(?:pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|nausea|vomiting|diarrhea)\b)/gi, ", ");
-      return formatted.replace(/\s{2,}/g, " ").trim();
+      formatted = formatted.replace(/\s{2,}/g, " ").trim();
+      return formatted;
+    }
+
+    function finalizeSpeechPunctuation(text) {
+      if (!text) return "";
+
+      const cleaned = text.replace(/\s+/g, " ").trim();
+      const hasExistingPunctuation = /[.!?;,]/.test(cleaned);
+      const words = cleaned.split(/\s+/).filter(Boolean);
+      const wordCount = words.length;
+      const lower = cleaned.toLowerCase();
+      const hasMedicalContext = /\b(patient|history|symptoms|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b/i.test(lower);
+      const hasClearEnding = /\b(and|with|for|has|had|was|were|is|are|started|began|since|after|before|today|yesterday|this morning|last night)\b/i.test(lower) || /\b(complains|complaint|history|symptoms|allergies|medication|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal)\b/i.test(lower);
+      const hasTooManyStopWords = /(and|the|of|to|for|with|in|on|at|a|an)\s+$/i.test(lower);
+      const confidenceScore = Math.min(1, (wordCount / 8) * 0.6 + (hasMedicalContext ? 0.25 : 0) + (hasClearEnding ? 0.15 : 0));
+
+      if (!hasExistingPunctuation && hasMedicalContext && wordCount >= 5 && confidenceScore >= 0.7 && !hasTooManyStopWords) {
+        return `${cleaned}.`;
+      }
+
+      return cleaned;
+    }
+
+    function scheduleSpeechPunctuationUpdate() {
+      if (speechPunctuationState.timer) {
+        window.clearTimeout(speechPunctuationState.timer);
+      }
+
+      speechPunctuationState.timer = window.setTimeout(() => {
+        const nextValue = finalizeSpeechPunctuation(speechPunctuationState.pendingText || els.transcriptInput.value);
+        if (nextValue !== els.transcriptInput.value.trim()) {
+          els.transcriptInput.value = nextValue;
+          ensureDraftTime();
+          categoriseTranscript();
+        }
+      }, 800);
     }
 
     function setupSpeech() {
@@ -902,6 +957,14 @@
         els.recordStatus.textContent = "Recording stopped";
         els.recordBtn.disabled = false;
         els.stopBtn.disabled = true;
+        if (speechPunctuationState.timer) {
+          window.clearTimeout(speechPunctuationState.timer);
+        }
+        const finalValue = finalizeSpeechPunctuation(speechPunctuationState.pendingText || els.transcriptInput.value);
+        if (finalValue !== els.transcriptInput.value.trim()) {
+          els.transcriptInput.value = finalValue;
+          ensureDraftTime();
+        }
         categoriseTranscript();
       };
 
@@ -923,11 +986,18 @@
 
         if (finalText) {
           const existingValue = els.transcriptInput.value.trim();
-          const spacer = existingValue ? " " : "";
-          const nextValue = `${existingValue}${spacer}${finalText.trim()}`;
-          els.transcriptInput.value = applySpeechPunctuation(nextValue);
+          const cleanedFinal = finalText.trim();
+          const now = Date.now();
+
+          speechPunctuationState.lastChunkAt = now;
+          speechPunctuationState.lastFinalText = cleanedFinal;
+          speechPunctuationState.pendingText = `${existingValue}${existingValue ? " " : ""}${cleanedFinal}`.trim();
+
+          const nextValue = applySpeechPunctuation(speechPunctuationState.pendingText);
+          els.transcriptInput.value = nextValue;
           ensureDraftTime();
           categoriseTranscript();
+          scheduleSpeechPunctuationUpdate();
         }
 
         els.recordStatus.textContent = interimText ? `Listening: ${interimText.trim()}` : "Recording";
@@ -985,6 +1055,13 @@
 
     function clearDraft() {
       if (isRecording && recognition) recognition.stop();
+      if (speechPunctuationState.timer) {
+        window.clearTimeout(speechPunctuationState.timer);
+      }
+      speechPunctuationState.lastChunkAt = null;
+      speechPunctuationState.pendingText = "";
+      speechPunctuationState.lastFinalText = "";
+      speechPunctuationState.timer = null;
       draftCreatedAt = null;
       lastTranscriptForCategories = "";
       els.transcriptInput.value = "";
