@@ -1150,43 +1150,24 @@
       const sentences = splitSentences(text).filter(Boolean);
       if (!sentences.length) return "No transcript available yet.";
 
-      const relevant = sentences.filter((sentence) => /pain|fever|cough|allergy|allergies|history|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|nausea|vomiting|diarrhea|shortness of breath|dizzy|not improving|improving|worsening|weeks|days|months|years|today|yesterday|last night|this morning/i.test(sentence));
-      const candidate = (relevant[0] || sentences[0] || "").replace(/\s+/g, " ").trim();
+      const normalizedText = text.replace(/\s+/g, " ").trim();
+      if (!normalizedText) return "No transcript available yet.";
 
-      if (!candidate) return "No clear clinical summary available.";
-
-      let summary = candidate
-        .replace(/^patient\s+/i, "")
-        .replace(/^(the patient|he|she|his|her)\s+/i, "")
-        .replace(/^(complains of|complaint of|complained of|reports|states|has|had|presents with|presenting with|is having|suffering from|experiencing)\s+/i, "")
-        .replace(/^(symptoms of|symptom of|history of|allergies to|allergy to|allergic to|reaction to)\s+/i, "")
-        .replace(/\b(?:and it has|it has|it is|it was|and has)\b/gi, "")
-        .replace(/\b(?:not reduced|not improved|not getting better|has not reduced|has not improved|has not gotten better|get better|getting worse|worsening)\b/gi, "not improving")
-        .replace(/\b(?:for|since)\s+\d+\s*(days?|weeks?|months?|years?|hours?|minutes?)\b/i, "for $&")
-        .replace(/\s+/g, " ")
-        .trim();
-
-      const durationMatch = summary.match(/\b(\d+\s*(days?|weeks?|months?|years?|hours?|minutes?))\b/i);
-      const improvementMatch = /not improving|improving|worsening|worse/i.test(summary);
       const symptomWords = ["pain", "fever", "cough", "rash", "swelling", "bleeding", "fatigue", "weakness", "headache", "chest", "abdominal", "nausea", "vomiting", "diarrhea", "dizziness", "shortness of breath"];
-      const symptomMatches = symptomWords.filter((word) => new RegExp(`\\b${word}\\b`, "i").test(summary));
+      const foundSymptoms = symptomWords.filter((word) => new RegExp(`\\b${word}\\b`, "i").test(normalizedText));
+      const durationMatch = normalizedText.match(/\b(\d+\s*(days?|weeks?|months?|years?|hours?|minutes?))\b/i);
+      const improvementMatch = normalizedText.match(/\b(not improving|improving|worsening|worse|not getting better|get better|get worse)\b/i);
 
-      if (symptomMatches.length && durationMatch && improvementMatch) {
-        const symptomPhrase = symptomMatches.join(" and ");
-        return `Patient reports ${symptomPhrase} ${durationMatch[1]}, not improving`.trim();
+      if (foundSymptoms.length) {
+        const symptomPhrase = foundSymptoms.join(" and ");
+        const durationText = durationMatch ? `for ${durationMatch[1]}` : "";
+        const improvementText = improvementMatch ? `, ${improvementMatch[1]}` : "";
+        return `Patient reports ${symptomPhrase}${durationText ? ` ${durationText}` : ""}${improvementText}`.trim();
       }
 
-      if (symptomMatches.length && durationMatch) {
-        const symptomPhrase = symptomMatches.join(" and ");
-        return `Patient reports ${symptomPhrase} ${durationMatch[1]}`.trim();
-      }
-
-      if (symptomMatches.length && improvementMatch) {
-        const symptomPhrase = symptomMatches.join(" and ");
-        return `Patient reports ${symptomPhrase}, not improving`.trim();
-      }
-
-      return summary.length > 100 ? summary.split(/\s+/).slice(0, 14).join(" ") : summary;
+      const relevant = sentences.filter((sentence) => /pain|fever|cough|allergy|allergies|history|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|nausea|vomiting|diarrhea|shortness of breath|dizzy|not improving|improving|worsening|weeks|days|months|years|today|yesterday|last night|this morning/i.test(sentence));
+      const fallback = (relevant[0] || sentences[0] || "").replace(/\s+/g, " ").trim();
+      return fallback.length > 100 ? fallback.split(/\s+/).slice(0, 14).join(" ") : fallback;
     }
 
     function shortenSummaryText(text, bucket) {
