@@ -1151,8 +1151,38 @@
       if (!sentences.length) return "No transcript available yet.";
 
       const relevant = sentences.filter((sentence) => /pain|fever|cough|allergy|allergies|history|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|nausea|vomiting|diarrhea|shortness of breath|dizzy|not improving|improving|worsening|weeks|days|months|years|today|yesterday|last night|this morning/i.test(sentence));
-      const chosen = relevant.slice(0, 2).length ? relevant.slice(0, 2) : sentences.slice(0, 2);
-      return chosen.join(" ").replace(/\s+/g, " ").trim();
+      const candidate = (relevant[0] || sentences[0] || "").replace(/\s+/g, " ").trim();
+
+      if (!candidate) return "No clear clinical summary available.";
+
+      let summary = candidate
+        .replace(/^patient\s+/i, "")
+        .replace(/^(the patient|he|she|his|her)\s+/i, "")
+        .replace(/^(complains of|complaint of|complained of|reports|states|has|had|presents with|presenting with|is having|suffering from|experiencing)\s+/i, "")
+        .replace(/^(symptoms of|symptom of|history of|allergies to|allergy to|allergic to|reaction to)\s+/i, "")
+        .replace(/\b(?:and it has|it has|it is|it was|and has)\b/gi, "")
+        .replace(/\b(?:not reduced|not improved|not getting better|has not reduced|has not improved|has not gotten better|get better|getting worse|worsening)\b/gi, "not improving")
+        .replace(/\b(?:for|since)\s+\d+\s*(days?|weeks?|months?|years?|hours?|minutes?)\b/i, "for $&")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      const durationMatch = summary.match(/\b(\d+\s*(days?|weeks?|months?|years?|hours?|minutes?))\b/i);
+      const improvementMatch = /not improving|improving|worsening|worse/i.test(summary);
+      const symptomMatch = summary.match(/\b(pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|nausea|vomiting|diarrhea|dizziness|shortness of breath)\b/i);
+
+      if (symptomMatch && durationMatch && improvementMatch) {
+        return `Patient reports ${symptomMatch[1]} ${durationMatch[1]}${summary.includes("not improving") ? ", not improving" : ""}`.trim();
+      }
+
+      if (symptomMatch && durationMatch) {
+        return `Patient reports ${symptomMatch[1]} ${durationMatch[1]}`.trim();
+      }
+
+      if (symptomMatch && improvementMatch) {
+        return `Patient reports ${symptomMatch[1]}${summary.includes("not improving") ? ", not improving" : ""}`.trim();
+      }
+
+      return summary.length > 100 ? summary.split(/\s+/).slice(0, 14).join(" ") : summary;
     }
 
     function shortenSummaryText(text, bucket) {
