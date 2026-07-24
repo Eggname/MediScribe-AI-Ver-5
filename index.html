@@ -673,7 +673,8 @@
       pendingText: "",
       lastFinalText: "",
       lastChunkText: "",
-      timer: null
+      timer: null,
+      pauseTimer: null
     };
     let msalApp = null;
     let msalLoadPromise = null;
@@ -887,6 +888,7 @@
       const hasExistingPunctuation = /[.!?,;:]/.test(formatted);
       const hasMedicalContext = /\b(patient|history|symptoms|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b/i.test(lower);
       const wordCount = formatted.split(/\s+/).filter(Boolean).length;
+      const looksLikeList = /\b(and|plus|also|with|then)\b/i.test(lower) && wordCount >= 3;
 
       if (!hasExistingPunctuation && hasMedicalContext && wordCount >= 3) {
         const listParts = formatted.split(/\s+(?:and|plus)\s+/i);
@@ -895,7 +897,9 @@
         }
       }
 
-      formatted = formatted.replace(/\b(?:and|plus)\s+(?=(?:pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|nausea|vomiting|diarrhea|shortness)\b)/gi, ", ");
+      if (!hasExistingPunctuation && looksLikeList && wordCount >= 4) {
+        formatted = formatted.replace(/\b(?:and|plus)\s+/gi, ", ");
+      }
       formatted = formatted.replace(/([a-z0-9])\s+(?=(?:the|this|patient|symptoms|history|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b)/gi, "$1. ");
       formatted = formatted.replace(/\s{2,}/g, " ").trim();
       return formatted;
@@ -913,10 +917,11 @@
       const hasMedicalContext = /\b(patient|history|symptoms|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b/i.test(lower);
       const looksLikeSentence = /\b(has|had|was|were|is|are|says|reported|complains|presents|presenting|started|began|since|for|with|after|before|today|yesterday|this morning|last night|feeling)\b/i.test(lower);
       const hasClearEnding = /\b(complains|complaint|history|symptoms|allergies|medication|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|today|yesterday|this morning|last night)\b/i.test(lower);
-      const hasTooManyStopWords = /\b(and|the|of|to|for|with|in|on|at|a|an)\s+$/i.test(lower);
-      const hasStrongClause = (wordCount >= 4 && hasMedicalContext && hasClearEnding) || (wordCount >= 5 && hasMedicalContext && looksLikeSentence);
+      const endsWithMedicalSymptom = /\b(pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|nausea|vomiting|diarrhea|shortness|breath|symptoms|allergies|history)\b$/i.test(lower);
+      const hasNaturalBoundary = /\b(and|but|however|also|then|today|yesterday|this morning|last night)\b/i.test(lower) || /\b(complains|complaint|history|symptoms|allergies|medication)\b/i.test(lower);
+      const hasStrongClause = (wordCount >= 4 && hasMedicalContext && hasClearEnding && !endsWithMedicalSymptom) || (wordCount >= 5 && hasMedicalContext && looksLikeSentence && !endsWithMedicalSymptom) || (wordCount >= 6 && hasMedicalContext && hasNaturalBoundary && !endsWithMedicalSymptom);
 
-      if (!hasExistingPunctuation && hasStrongClause && !hasTooManyStopWords) {
+      if (!hasExistingPunctuation && hasStrongClause) {
         return `${cleaned}.`;
       }
 
@@ -949,18 +954,23 @@
       if (speechPunctuationState.timer) {
         window.clearTimeout(speechPunctuationState.timer);
       }
+      if (speechPunctuationState.pauseTimer) {
+        window.clearTimeout(speechPunctuationState.pauseTimer);
+      }
 
-      speechPunctuationState.timer = window.setTimeout(() => {
-        const finalizedChunk = finalizeSpeechPunctuation(speechPunctuationState.lastChunkText || "");
-        if (finalizedChunk !== speechPunctuationState.lastChunkText.trim()) {
-          const nextValue = replaceLastChunk(finalizedChunk);
-          if (nextValue !== els.transcriptInput.value.trim()) {
-            els.transcriptInput.value = nextValue;
-            ensureDraftTime();
-            categoriseTranscript();
+      speechPunctuationState.pauseTimer = window.setTimeout(() => {
+        speechPunctuationState.timer = window.setTimeout(() => {
+          const finalizedChunk = finalizeSpeechPunctuation(speechPunctuationState.lastChunkText || "");
+          if (finalizedChunk !== speechPunctuationState.lastChunkText.trim()) {
+            const nextValue = replaceLastChunk(finalizedChunk);
+            if (nextValue !== els.transcriptInput.value.trim()) {
+              els.transcriptInput.value = nextValue;
+              ensureDraftTime();
+              categoriseTranscript();
+            }
           }
-        }
-      }, 800);
+        }, 450);
+      }, 350);
     }
 
     function setupSpeech() {
@@ -993,6 +1003,9 @@
         els.stopBtn.disabled = true;
         if (speechPunctuationState.timer) {
           window.clearTimeout(speechPunctuationState.timer);
+        }
+        if (speechPunctuationState.pauseTimer) {
+          window.clearTimeout(speechPunctuationState.pauseTimer);
         }
         const finalizedChunk = finalizeSpeechPunctuation(speechPunctuationState.lastChunkText || "");
         if (finalizedChunk !== speechPunctuationState.lastChunkText.trim()) {
