@@ -1073,6 +1073,51 @@
       return [...new Set(items.map((item) => item.trim()).filter(Boolean))].join("\n");
     }
 
+    function shortenSummaryText(text, bucket) {
+      let phrase = text
+        .replace(/\s+/g, " ")
+        .replace(/^[^a-z0-9]+/i, "")
+        .trim();
+
+      phrase = phrase
+        .replace(/^(patient|the patient|he|she|his|her)\s+/i, "")
+        .replace(/^(complains of|complaint of|complained of|reports|states|has|had|presents with|presenting with|suffering from|is experiencing|experiencing)\s+/i, "")
+        .replace(/^(family history of|history of|allergies to|allergy to|allergic to|reaction to)\s+/i, "")
+        .replace(/^(main complaint|complaint|symptoms|symptom)\s+/i, "")
+        .replace(/^(for|since|started|began|onset|duration)\s+/i, "")
+        .replace(/\b(?:for|since)\s+\d+\s*(days?|weeks?|months?|years?|hours?|minutes?)\b.*$/i, "")
+        .replace(/\b(?:today|yesterday|last night|this morning)\b.*$/i, "")
+        .replace(/^(to|of|with)\s+/i, "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      if (!phrase) return "";
+
+      if (bucket === "familyHistory") {
+        const familyMatch = phrase.match(/^(mother|father|parent|sibling|brother|sister|grandparent)\b/i);
+        if (familyMatch) {
+          const rest = phrase.replace(/^(mother|father|parent|sibling|brother|sister|grandparent)\b\s*(has|have)?\s*(a\s*)?(history of)?\s*/i, "").trim();
+          return rest ? `${familyMatch[1]}: ${rest}` : `${familyMatch[1]} history`;
+        }
+        return phrase.replace(/^(family history|history)\s+/i, "").trim();
+      }
+
+      if (bucket === "allergies") {
+        return phrase.replace(/^(allergies|allergy|allergic)\s+/i, "").replace(/^(to|for)\s+/i, "").trim();
+      }
+
+      if (bucket === "timeframe") {
+        const timeframeMatch = phrase.match(/\b(?:for|since)?\s*(\d+\s*(days?|weeks?|months?|years?|hours?|minutes?)|today|yesterday|last night|this morning)\b/i);
+        return timeframeMatch ? timeframeMatch[0].trim() : phrase;
+      }
+
+      if (bucket === "mainComplaints") {
+        return phrase.replace(/^(pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest pain|abdominal pain|shortness of breath|nausea|vomiting|diarrhea|dizziness)\b/i, "$1").trim();
+      }
+
+      return phrase.length > 80 ? phrase.split(/\s+/).slice(0, 10).join(" ") : phrase;
+    }
+
     function categoriseTranscript() {
       const text = els.transcriptInput.value.trim();
       if (!text || text === lastTranscriptForCategories) return;
@@ -1087,21 +1132,25 @@
       };
 
       const rules = [
-        ["familyHistory", /\b(family history|mother|father|parent|sibling|brother|sister|grandparent|runs in the family|hereditary|genetic)\b/i],
+        ["familyHistory", /\b(family history|mother|father|parent|sibling|brother|sister|grandparent|runs in the family|family|hereditary|genetic)\b/i],
         ["allergies", /\b(allergy|allergic|allergies|reaction to|rash after|anaphylaxis|penicillin|latex|shellfish|peanut|drug allergy)\b/i],
         ["timeframe", /\b(today|yesterday|last night|this morning|for \d+|since|started|began|onset|duration|week|weeks|month|months|day|days|hour|hours|year|years|acute|chronic)\b/i],
-        ["mainComplaints", /\b(complain|complaint|pain|fever|cough|shortness of breath|breathless|dizzy|nausea|vomit|diarrhea|headache|chest|abdominal|rash|swelling|bleeding|fatigue|weakness)\b/i]
+        ["mainComplaints", /\b(complain|complaint|complained|pain|fever|cough|shortness of breath|breathless|dizzy|nausea|vomit|diarrhea|headache|chest|abdominal|rash|swelling|bleeding|fatigue|weakness)\b/i]
       ];
 
       for (const sentence of splitSentences(text)) {
         let matched = false;
         for (const [bucket, regex] of rules) {
           if (regex.test(sentence)) {
-            buckets[bucket].push(sentence);
+            const concise = shortenSummaryText(sentence, bucket);
+            if (concise) buckets[bucket].push(concise);
             matched = true;
           }
         }
-        if (!matched) buckets.otherKeynotes.push(sentence);
+        if (!matched) {
+          const concise = shortenSummaryText(sentence, "otherKeynotes");
+          if (concise) buckets.otherKeynotes.push(concise);
+        }
       }
 
       for (const [key, field] of categoryFields) {
