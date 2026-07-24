@@ -428,6 +428,39 @@
       resize: vertical;
     }
 
+    .patient-info-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .patient-field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .patient-field label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--muted);
+    }
+
+    .patient-field input {
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      font-size: 0.95rem;
+    }
+
+    .patient-field input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.08);
+    }
+
     .history {
       display: grid;
       gap: 10px;
@@ -589,6 +622,25 @@
     </section>
 
     <section id="workspace" class="workspace">
+      <section class="panel section" style="margin-bottom: 16px;">
+        <div class="section-head">
+          <h2>Patient Information</h2>
+        </div>
+        <div class="patient-info-grid">
+          <div class="patient-field">
+            <label for="patientName">Patient Name</label>
+            <input type="text" id="patientName" placeholder="e.g., John Doe">
+          </div>
+          <div class="patient-field">
+            <label for="patientID">Patient ID</label>
+            <input type="text" id="patientID" placeholder="e.g., MRN or ID">
+          </div>
+          <div class="patient-field">
+            <label for="patientDOB">Date of Birth</label>
+            <input type="date" id="patientDOB">
+          </div>
+        </div>
+      </section>
       <div class="topgrid">
         <section class="panel section">
           <div class="section-head">
@@ -699,6 +751,9 @@
       clearBtn: document.getElementById("clearBtn"),
       recordDot: document.getElementById("recordDot"),
       recordStatus: document.getElementById("recordStatus"),
+      patientName: document.getElementById("patientName"),
+      patientID: document.getElementById("patientID"),
+      patientDOB: document.getElementById("patientDOB"),
       transcriptInput: document.getElementById("transcriptInput"),
       createdStamp: document.getElementById("createdStamp"),
       updatedStamp: document.getElementById("updatedStamp"),
@@ -1369,6 +1424,9 @@
       draftCreatedAt = null;
       lastTranscriptForCategories = "";
       summarySourceMap = {};
+      els.patientName.value = "";
+      els.patientID.value = "";
+      els.patientDOB.value = "";
       els.transcriptInput.value = "";
       els.createdStamp.textContent = "Not started";
       els.updatedStamp.textContent = "No edits yet";
@@ -1385,6 +1443,9 @@
         userName: activeUser.name,
         createdAt: draftCreatedAt || new Date().toISOString(),
         savedAt: new Date().toISOString(),
+        patientName: els.patientName?.value.trim() || "",
+        patientID: els.patientID?.value.trim() || "",
+        patientDOB: els.patientDOB?.value.trim() || "",
         transcript: els.transcriptInput.value.trim(),
         briefSummary: els.briefProblemSummary?.value.trim() || "",
         summary: Object.fromEntries(categoryFields.map(([key, field]) => [key, field.value.trim()]))
@@ -1460,6 +1521,9 @@
       if (!note) return;
       draftCreatedAt = note.createdAt;
       lastTranscriptForCategories = note.transcript;
+      els.patientName.value = note.patientName || "";
+      els.patientID.value = note.patientID || "";
+      els.patientDOB.value = note.patientDOB || "";
       els.transcriptInput.value = note.transcript;
       els.createdStamp.textContent = formatDateTime(note.createdAt);
       els.updatedStamp.textContent = formatDateTime(note.savedAt);
@@ -1555,6 +1619,9 @@
         sharePointItemId: item.id,
         userId: f.UserID || "",
         userName: f.UserName || "",
+        patientName: f.PatientName || "",
+        patientID: f.PatientID || "",
+        patientDOB: f.PatientDOB || "",
         createdAt: f.CreatedAt || item.createdDateTime,
         savedAt: f.SavedAt || item.lastModifiedDateTime,
         transcript: f.Transcript || "",
@@ -1603,6 +1670,9 @@
             Title: `${note.userId} - ${formatDateTime(note.savedAt)}`,
             UserID: note.userId,
             UserName: note.userName,
+            PatientName: note.patientName,
+            PatientID: note.patientID,
+            PatientDOB: note.patientDOB,
             Transcript: note.transcript,
             FamilyHistory: note.summary.familyHistory,
             Allergies: note.summary.allergies,
