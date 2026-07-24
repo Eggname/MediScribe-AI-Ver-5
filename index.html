@@ -1184,26 +1184,34 @@
 
       categoryFields.forEach(([, field]) => {
         const key = field.dataset.category;
-        field.addEventListener("mousemove", (event) => {
-          const entries = summarySourceMap[key] || [];
-          const lineHeight = parseFloat(getComputedStyle(field).lineHeight) || 22;
-          const rect = field.getBoundingClientRect();
-          const relativeY = event.clientY - rect.top;
-          const lineIndex = Math.max(0, Math.min(entries.length - 1, Math.floor(relativeY / lineHeight)));
+        const card = field.closest(".category");
 
-          if (!entries.length || !entries[lineIndex]) {
+        const showSummaryHoverPreview = (event) => {
+          const entries = summarySourceMap[key] || [];
+          if (!entries.length) return;
+
+          const lineHeight = Math.max(18, parseFloat(getComputedStyle(field).lineHeight) || 22);
+          const rect = field.getBoundingClientRect();
+          const paddingTop = parseFloat(getComputedStyle(field).paddingTop) || 0;
+          const relativeY = event.clientY - rect.top + field.scrollTop - paddingTop;
+          const lineIndex = Math.max(0, Math.min(entries.length - 1, Math.floor(relativeY / lineHeight)));
+          const entry = entries[lineIndex] || entries[entries.length - 1];
+
+          if (!entry) {
             hideSummaryHoverPreview();
             return;
           }
 
-          const entry = entries[lineIndex];
           hoverHint.innerHTML = `<strong>Source:</strong><br>${entry.source}`;
           hoverHint.classList.add("show");
           hoverHint.style.left = `${Math.min(window.innerWidth - 240, event.clientX + 12)}px`;
           hoverHint.style.top = `${Math.min(window.innerHeight - 90, event.clientY + 12)}px`;
-          field.closest(".category")?.classList.add("summary-active");
-        });
+          card?.classList.add("summary-active");
+        };
 
+        card?.addEventListener("mousemove", showSummaryHoverPreview);
+        card?.addEventListener("mouseenter", showSummaryHoverPreview);
+        card?.addEventListener("mouseleave", hideSummaryHoverPreview);
         field.addEventListener("mouseleave", hideSummaryHoverPreview);
         field.addEventListener("blur", hideSummaryHoverPreview);
       });
