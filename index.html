@@ -1168,18 +1168,22 @@
 
       const durationMatch = summary.match(/\b(\d+\s*(days?|weeks?|months?|years?|hours?|minutes?))\b/i);
       const improvementMatch = /not improving|improving|worsening|worse/i.test(summary);
-      const symptomMatch = summary.match(/\b(pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|nausea|vomiting|diarrhea|dizziness|shortness of breath)\b/i);
+      const symptomWords = ["pain", "fever", "cough", "rash", "swelling", "bleeding", "fatigue", "weakness", "headache", "chest", "abdominal", "nausea", "vomiting", "diarrhea", "dizziness", "shortness of breath"];
+      const symptomMatches = symptomWords.filter((word) => new RegExp(`\\b${word}\\b`, "i").test(summary));
 
-      if (symptomMatch && durationMatch && improvementMatch) {
-        return `Patient reports ${symptomMatch[1]} ${durationMatch[1]}${summary.includes("not improving") ? ", not improving" : ""}`.trim();
+      if (symptomMatches.length && durationMatch && improvementMatch) {
+        const symptomPhrase = symptomMatches.join(" and ");
+        return `Patient reports ${symptomPhrase} ${durationMatch[1]}, not improving`.trim();
       }
 
-      if (symptomMatch && durationMatch) {
-        return `Patient reports ${symptomMatch[1]} ${durationMatch[1]}`.trim();
+      if (symptomMatches.length && durationMatch) {
+        const symptomPhrase = symptomMatches.join(" and ");
+        return `Patient reports ${symptomPhrase} ${durationMatch[1]}`.trim();
       }
 
-      if (symptomMatch && improvementMatch) {
-        return `Patient reports ${symptomMatch[1]}${summary.includes("not improving") ? ", not improving" : ""}`.trim();
+      if (symptomMatches.length && improvementMatch) {
+        const symptomPhrase = symptomMatches.join(" and ");
+        return `Patient reports ${symptomPhrase}, not improving`.trim();
       }
 
       return summary.length > 100 ? summary.split(/\s+/).slice(0, 14).join(" ") : summary;
