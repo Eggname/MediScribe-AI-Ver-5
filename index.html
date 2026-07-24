@@ -861,6 +861,19 @@
       els.updatedStamp.textContent = formatDateTime(new Date().toISOString());
     }
 
+    function applySpeechPunctuation(text) {
+      if (!text) return "";
+
+      let formatted = text.replace(/\s+/g, " ").trim();
+      formatted = formatted.replace(/\b(full\s+stop|fullstop|period|stop)\b/gi, ".");
+      formatted = formatted.replace(/\bcomma\b/gi, ",");
+      formatted = formatted.replace(/\b(question\s+mark|questionmark)\b/gi, "?");
+      formatted = formatted.replace(/\b(new\s+line|new\s+paragraph)\b/gi, "\n");
+      formatted = formatted.replace(/([a-z0-9])\s+(?=(?:the|this|patient|symptoms|history|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b)/gi, "$1. ");
+      formatted = formatted.replace(/\b(?:and|plus)\s+(?=(?:pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|nausea|vomiting|diarrhea)\b)/gi, ", ");
+      return formatted.replace(/\s{2,}/g, " ").trim();
+    }
+
     function setupSpeech() {
       if (!SpeechRecognition) {
         els.supportStatus.textContent = "Speech recognition is unavailable in this browser. Manual entry still works.";
@@ -909,8 +922,10 @@
         }
 
         if (finalText) {
-          const spacer = els.transcriptInput.value.trim() ? " " : "";
-          els.transcriptInput.value = `${els.transcriptInput.value.trim()}${spacer}${finalText.trim()}`;
+          const existingValue = els.transcriptInput.value.trim();
+          const spacer = existingValue ? " " : "";
+          const nextValue = `${existingValue}${spacer}${finalText.trim()}`;
+          els.transcriptInput.value = applySpeechPunctuation(nextValue);
           ensureDraftTime();
           categoriseTranscript();
         }
