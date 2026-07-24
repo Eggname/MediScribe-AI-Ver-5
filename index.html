@@ -880,6 +880,8 @@
       formatted = formatted.replace(/\bcomma\b/gi, ",");
       formatted = formatted.replace(/\b(question\s+mark|questionmark)\b/gi, "?");
       formatted = formatted.replace(/\b(new\s+line|new\s+paragraph)\b/gi, "\n");
+      formatted = formatted.replace(/([.?,;:]){2,}/g, "$1");
+      formatted = formatted.replace(/\s+([,.;:?!])/g, "$1");
 
       const lower = formatted.toLowerCase();
       const hasExistingPunctuation = /[.!?,;:]/.test(formatted);
@@ -893,8 +895,8 @@
         }
       }
 
+      formatted = formatted.replace(/\b(?:and|plus)\s+(?=(?:pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|nausea|vomiting|diarrhea|shortness)\b)/gi, ", ");
       formatted = formatted.replace(/([a-z0-9])\s+(?=(?:the|this|patient|symptoms|history|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b)/gi, "$1. ");
-      formatted = formatted.replace(/\b(?:and|plus)\s+(?=(?:pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|nausea|vomiting|diarrhea)\b)/gi, ", ");
       formatted = formatted.replace(/\s{2,}/g, " ").trim();
       return formatted;
     }
@@ -903,15 +905,16 @@
       if (!text) return "";
 
       const cleaned = text.replace(/\s+/g, " ").trim();
-      const hasExistingPunctuation = /[.!?;,]/.test(cleaned);
-      const words = cleaned.split(/\s+/).filter(Boolean);
+      const lastSegment = cleaned.split(/(?<=[.!?])\s+/).pop() || cleaned;
+      const hasExistingPunctuation = /[.!?;,]/.test(lastSegment);
+      const words = lastSegment.split(/\s+/).filter(Boolean);
       const wordCount = words.length;
-      const lower = cleaned.toLowerCase();
+      const lower = lastSegment.toLowerCase();
       const hasMedicalContext = /\b(patient|history|symptoms|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b/i.test(lower);
-      const looksLikeSentence = /\b(has|had|was|were|is|are|says|reported|complains|presents|presenting|started|began|since|for|with|after|before|today|yesterday|this morning|last night)\b/i.test(lower);
-      const hasClearEnding = /\b(complains|complaint|history|symptoms|allergies|medication|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal)\b/i.test(lower);
+      const looksLikeSentence = /\b(has|had|was|were|is|are|says|reported|complains|presents|presenting|started|began|since|for|with|after|before|today|yesterday|this morning|last night|feeling)\b/i.test(lower);
+      const hasClearEnding = /\b(complains|complaint|history|symptoms|allergies|medication|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|today|yesterday|this morning|last night)\b/i.test(lower);
       const hasTooManyStopWords = /\b(and|the|of|to|for|with|in|on|at|a|an)\s+$/i.test(lower);
-      const hasStrongClause = (wordCount >= 6 && hasMedicalContext && hasClearEnding) || (wordCount >= 7 && hasMedicalContext && looksLikeSentence);
+      const hasStrongClause = (wordCount >= 4 && hasMedicalContext && hasClearEnding) || (wordCount >= 5 && hasMedicalContext && looksLikeSentence);
 
       if (!hasExistingPunctuation && hasStrongClause && !hasTooManyStopWords) {
         return `${cleaned}.`;
@@ -922,19 +925,24 @@
 
     function buildTranscriptWithChunk(chunkText) {
       const existingValue = els.transcriptInput.value.trim();
-      const nextChunk = applySpeechPunctuation(chunkText);
-      return existingValue ? `${existingValue} ${nextChunk}` : nextChunk;
+      const combined = existingValue ? `${existingValue} ${chunkText}` : chunkText;
+      return finalizeSpeechPunctuation(applySpeechPunctuation(combined));
     }
 
     function replaceLastChunk(chunkText) {
       const currentValue = els.transcriptInput.value.trim();
       const previousChunk = speechPunctuationState.lastChunkText ? speechPunctuationState.lastChunkText.trim() : "";
-      if (!previousChunk || !currentValue.endsWith(previousChunk)) {
-        return currentValue;
+      if (!previousChunk) {
+        return finalizeSpeechPunctuation(applySpeechPunctuation(currentValue));
+      }
+
+      if (!currentValue.endsWith(previousChunk)) {
+        return finalizeSpeechPunctuation(applySpeechPunctuation(currentValue));
       }
 
       const prefix = currentValue.slice(0, currentValue.length - previousChunk.length).trimEnd();
-      return prefix ? `${prefix} ${chunkText}` : chunkText;
+      const nextValue = prefix ? `${prefix} ${chunkText}` : chunkText;
+      return finalizeSpeechPunctuation(applySpeechPunctuation(nextValue));
     }
 
     function scheduleSpeechPunctuationUpdate() {
