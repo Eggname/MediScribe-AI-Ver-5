@@ -889,6 +889,8 @@
       const hasMedicalContext = /\b(patient|history|symptoms|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b/i.test(lower);
       const wordCount = formatted.split(/\s+/).filter(Boolean).length;
       const looksLikeList = /\b(and|plus|also|with|then)\b/i.test(lower) && wordCount >= 3;
+      const looksLikeTimePhrase = /\b(already|for|since|long|time|days|day|week|weeks|month|months|years|year|today|yesterday|morning|night)\b/i.test(lower) && wordCount >= 4;
+      const looksLikeFamilyHistory = /\b(mother|father|parent|sibling|brother|sister|grandparent|family|history)\b/i.test(lower) && wordCount >= 4;
 
       if (!hasExistingPunctuation && hasMedicalContext && wordCount >= 3) {
         const listParts = formatted.split(/\s+(?:and|plus)\s+/i);
@@ -900,6 +902,11 @@
       if (!hasExistingPunctuation && looksLikeList && wordCount >= 4) {
         formatted = formatted.replace(/\b(?:and|plus)\s+/gi, ", ");
       }
+
+      if (!hasExistingPunctuation && (looksLikeTimePhrase || looksLikeFamilyHistory)) {
+        formatted = formatted.replace(/\b(?:for|since|already|has|have|history)\b/gi, (match) => `${match} `);
+      }
+
       formatted = formatted.replace(/([a-z0-9])\s+(?=(?:the|this|patient|symptoms|history|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b)/gi, "$1. ");
       formatted = formatted.replace(/\s{2,}/g, " ").trim();
       return formatted;
@@ -918,8 +925,10 @@
       const looksLikeSentence = /\b(has|had|was|were|is|are|says|reported|complains|presents|presenting|started|began|since|for|with|after|before|today|yesterday|this morning|last night|feeling)\b/i.test(lower);
       const hasClearEnding = /\b(complains|complaint|history|symptoms|allergies|medication|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|today|yesterday|this morning|last night)\b/i.test(lower);
       const endsWithMedicalSymptom = /\b(pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|nausea|vomiting|diarrhea|shortness|breath|symptoms|allergies|history)\b$/i.test(lower);
-      const hasNaturalBoundary = /\b(and|but|however|also|then|today|yesterday|this morning|last night)\b/i.test(lower) || /\b(complains|complaint|history|symptoms|allergies|medication)\b/i.test(lower);
-      const hasStrongClause = (wordCount >= 4 && hasMedicalContext && hasClearEnding && !endsWithMedicalSymptom) || (wordCount >= 5 && hasMedicalContext && looksLikeSentence && !endsWithMedicalSymptom) || (wordCount >= 6 && hasMedicalContext && hasNaturalBoundary && !endsWithMedicalSymptom);
+      const hasNaturalBoundary = /\b(and|but|however|also|then|today|yesterday|this morning|last night|already|for|since)\b/i.test(lower) || /\b(complains|complaint|history|symptoms|allergies|medication|mother|father|parent|sibling)\b/i.test(lower);
+      const hasTimeBoundary = /\b(already|for|since|days|day|week|weeks|month|months|years|year|today|yesterday|this morning|last night)\b/i.test(lower) && wordCount >= 5;
+      const hasFamilyBoundary = /\b(mother|father|parent|sibling|brother|sister|grandparent|family)\b/i.test(lower) && wordCount >= 4;
+      const hasStrongClause = (wordCount >= 4 && hasMedicalContext && hasClearEnding && !endsWithMedicalSymptom) || (wordCount >= 5 && hasMedicalContext && looksLikeSentence && !endsWithMedicalSymptom) || (wordCount >= 6 && hasMedicalContext && hasNaturalBoundary && !endsWithMedicalSymptom) || (wordCount >= 5 && (hasTimeBoundary || hasFamilyBoundary) && !endsWithMedicalSymptom);
 
       if (!hasExistingPunctuation && hasStrongClause) {
         return `${cleaned}.`;
