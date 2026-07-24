@@ -1179,7 +1179,41 @@
       const allergyText = allergies.length ? allergies.join(", ") : "no known allergies";
       const timeframeText = timeframe.length ? timeframe.join(", ") : "unknown duration";
 
-      return `Patient complained ${complaintText}, with ${allergyText}, for ${timeframeText}`.trim();
+      return `Patient complained ${complaintText}, for ${timeframeText}, with ${allergyText}`.trim();
+    }
+
+    function buildBriefProblemSummaryFromNote(note) {
+      const directSummary = note?.briefSummary || "";
+      if (directSummary.trim()) return directSummary.trim();
+
+      const summary = note?.summary || {};
+      const complaintField = summary.mainComplaints || "";
+      const allergyField = summary.allergies || "";
+      const timeframeField = summary.timeframe || "";
+
+      const complaints = complaintField
+        .split(/\n/)
+        .map((line) => line.replace(/^•\s*/, "").trim())
+        .filter(Boolean)
+        .slice(0, 3);
+
+      const allergies = allergyField
+        .split(/\n/)
+        .map((line) => line.replace(/^•\s*/, "").trim())
+        .filter(Boolean)
+        .slice(0, 3);
+
+      const timeframe = timeframeField
+        .split(/\n/)
+        .map((line) => line.replace(/^•\s*/, "").trim())
+        .filter(Boolean)
+        .slice(0, 3);
+
+      const complaintText = complaints.length ? complaints.join(", ") : "symptoms";
+      const allergyText = allergies.length ? allergies.join(", ") : "no known allergies";
+      const timeframeText = timeframe.length ? timeframe.join(", ") : "unknown duration";
+
+      return `Patient complained ${complaintText}, for ${timeframeText}, with ${allergyText}`.trim();
     }
 
     function shortenSummaryText(text, bucket) {
@@ -1352,6 +1386,7 @@
         createdAt: draftCreatedAt || new Date().toISOString(),
         savedAt: new Date().toISOString(),
         transcript: els.transcriptInput.value.trim(),
+        briefSummary: els.briefProblemSummary?.value.trim() || "",
         summary: Object.fromEntries(categoryFields.map(([key, field]) => [key, field.value.trim()]))
       };
     }
@@ -1401,12 +1436,16 @@
       }
 
       els.history.innerHTML = notes.map((note) => {
-        const complaint = note.summary.mainComplaints || "No main complaint recorded";
+        const briefSummary = buildBriefProblemSummaryFromNote(note);
+        const summaryText = briefSummary
+          .replace(/^•\s*/gm, "")
+          .replace(/\n/g, " • ")
+          .trim();
         return `
           <article class="record">
             <strong>${formatDateTime(note.savedAt)}</strong>
             <span class="small">Saved to SharePoint</span>
-            <p>${escapeHtml(complaint).replace(/\n/g, "<br>")}</p>
+            <p>${escapeHtml(summaryText || "No brief summary available").replace(/\n/g, "<br>")}</p>
             <div class="record-actions">
               <button class="ghost" type="button" data-load-note="${note.id}">Load note</button>
               <button class="danger" type="button" data-delete-note="${note.id}">Delete</button>
@@ -1427,6 +1466,9 @@
       categoryFields.forEach(([key, field]) => {
         field.value = note.summary[key] || "";
       });
+      if (els.briefProblemSummary) {
+        els.briefProblemSummary.value = buildBriefProblemSummaryFromNote(note);
+      }
       els.recordStatus.textContent = "Loaded saved note for review";
     }
 
@@ -1516,6 +1558,7 @@
         createdAt: f.CreatedAt || item.createdDateTime,
         savedAt: f.SavedAt || item.lastModifiedDateTime,
         transcript: f.Transcript || "",
+        briefSummary: f.BriefSummary || "",
         summary: {
           familyHistory: f.FamilyHistory || "",
           allergies: f.Allergies || "",
@@ -1566,6 +1609,7 @@
             Timeframe: note.summary.timeframe,
             MainComplaints: note.summary.mainComplaints,
             OtherKeynotes: note.summary.otherKeynotes,
+            BriefSummary: note.briefSummary || "",
             CreatedAt: note.createdAt,
             SavedAt: note.savedAt,
             ClientNoteID: note.id
