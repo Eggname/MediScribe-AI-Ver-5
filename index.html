@@ -618,6 +618,8 @@
           <button id="microsoftSignInBtn" type="button">Sign in with Microsoft</button>
           <button id="editConfigBtn" class="ghost" type="button">Edit configuration</button>
         </div>
+        <button id="mockSignInBtn" class="ghost hidden" type="button">Continue with test account (dev only)</button>
+        <span id="mockModeHint" class="small hidden">Local dev build detected — test-account notes are stored only in this browser, not in SharePoint.</span>
       </div>
     </section>
 
@@ -652,10 +654,18 @@
             <span id="recordStatus">Ready to record</span>
           </div>
           <div class="controls">
+            <label style="flex-direction: row; align-items: center; gap: 8px; font-weight: 400;">
+              <span class="small" style="font-weight:700; color: var(--ink);">Language</span>
+              <select id="languageSelect">
+                <option value="en">English</option>
+                <option value="ms">Bahasa Melayu</option>
+              </select>
+            </label>
             <button id="recordBtn" type="button">Start recording</button>
             <button id="stopBtn" class="ghost" type="button" disabled>Stop</button>
             <button id="clearBtn" class="ghost" type="button">Clear draft</button>
           </div>
+          <span id="languageHint" class="small"></span>
           <label>
             Editable transcript
             <textarea id="transcriptInput" rows="12" placeholder="Recorded speech appears here. You can also type or paste notes manually."></textarea>
@@ -728,6 +738,7 @@
 
   <script>
     const graphConfigKey = "mediscribe.graphConfig";
+    const speechLangKey = "mediscribe.speechLang";
     const msalScriptUrls = [
       "https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js",
       "https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js",
@@ -747,6 +758,8 @@
       editConfigBtn: document.getElementById("editConfigBtn"),
       supportStatus: document.getElementById("supportStatus"),
       recordBtn: document.getElementById("recordBtn"),
+      languageSelect: document.getElementById("languageSelect"),
+      languageHint: document.getElementById("languageHint"),
       stopBtn: document.getElementById("stopBtn"),
       clearBtn: document.getElementById("clearBtn"),
       recordDot: document.getElementById("recordDot"),
@@ -766,6 +779,8 @@
       siteIdInput: document.getElementById("siteIdInput"),
       listIdInput: document.getElementById("listIdInput"),
       microsoftSignInBtn: document.getElementById("microsoftSignInBtn"),
+      mockSignInBtn: document.getElementById("mockSignInBtn"),
+      mockModeHint: document.getElementById("mockModeHint"),
       history: document.getElementById("history"),
       briefProblemSummary: document.getElementById("briefProblemSummary"),
       summarySourcePanel: document.getElementById("summarySourcePanel"),
@@ -828,6 +843,24 @@
 
     function isGraphConfigured(config = readGraphConfig()) {
       return Boolean(config.tenantId && config.clientId && config.siteId && config.listId);
+    }
+
+    // The test-account option only ever appears when this file is served from
+    // localhost/127.0.0.1 (e.g. running it directly during development). It stays
+    // hidden — and unusable — on any real deployment, so it can't function as a
+    // login bypass for real users or real patient data.
+    function isLocalDev() {
+      return ["localhost", "127.0.0.1", "::1", ""].includes(window.location.hostname);
+    }
+
+    const mockNotesKey = "mediscribe.mockNotes";
+
+    function readMockNotes() {
+      return readStore(mockNotesKey, []);
+    }
+
+    function writeMockNotes(notes) {
+      writeStore(mockNotesKey, notes);
     }
 
     function updateSyncMessage(message) {
@@ -939,6 +972,10 @@
       const configured = isGraphConfigured();
       els.configStep.classList.toggle("hidden", configured);
       els.signinStep.classList.toggle("hidden", !configured);
+
+      const showMock = isLocalDev();
+      els.mockSignInBtn.classList.toggle("hidden", !showMock);
+      els.mockModeHint.classList.toggle("hidden", !showMock);
     }
 
     function formatDateTime(value) {
@@ -976,6 +1013,12 @@
       await showWorkspace(user);
     }
 
+    function signInMock() {
+      if (!isLocalDev()) return; // belt-and-braces; button is already hidden elsewhere
+      const user = { id: "dev-test-account", name: "Test Account (local dev)", mock: true };
+      showWorkspace(user);
+    }
+
     function ensureDraftTime() {
       if (!draftCreatedAt) {
         draftCreatedAt = new Date().toISOString();
@@ -988,46 +1031,122 @@
       return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     }
 
-    function applySpeechPunctuation(text) {
+    // ---- language packs: speech-recognition locale + keyword sets used for ----
+    // ---- spoken-punctuation cleanup and transcript categorisation ----
+    const LANG_PACKS = {
+      en: {
+        recognitionLang: "en-US",
+        fullStop: /\b(full\s+stop|fullstop|period|stop)\b/gi,
+        comma: /\bcomma\b/gi,
+        questionMark: /\b(question\s+mark|questionmark)\b/gi,
+        newLine: /\b(new\s+line|new\s+paragraph)\b/gi,
+        medicalContext: /\b(patient|history|symptoms|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b/i,
+        listConnectors: /\b(and|plus|also|with|then)\b/i,
+        listConnectorsReplace: /\b(?:and|plus)\s+/gi,
+        timePhrase: /\b(already|for|since|long|time|days|day|week|weeks|month|months|years|year|today|yesterday|morning|night)\b/i,
+        familyWords: /\b(mother|father|parent|sibling|brother|sister|grandparent|family|history)\b/i,
+        timeBoundaryReplace: /\b(?:for|since|already|has|have|history)\b/gi,
+        sentenceBoundaryLookahead: /([a-z0-9])\s+(?=(?:the|this|patient|symptoms|history|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b)/gi,
+        looksLikeSentence: /\b(has|had|was|were|is|are|says|reported|complains|presents|presenting|started|began|since|for|with|after|before|today|yesterday|this morning|last night|feeling)\b/i,
+        hasClearEnding: /\b(complains|complaint|history|symptoms|allergies|medication|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|today|yesterday|this morning|last night)\b/i,
+        endsWithSymptom: /\b(pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|nausea|vomiting|diarrhea|shortness|breath|symptoms|allergies|history)\b$/i,
+        naturalBoundary: /\b(and|but|however|also|then|today|yesterday|this morning|last night|already|for|since)\b/i,
+        naturalBoundaryFamily: /\b(complains|complaint|history|symptoms|allergies|medication|mother|father|parent|sibling)\b/i,
+        timeBoundary: /\b(already|for|since|days|day|week|weeks|month|months|years|year|today|yesterday|this morning|last night)\b/i,
+        familyBoundary: /\b(mother|father|parent|sibling|brother|sister|grandparent|family)\b/i,
+        categoryRules: [
+          ["familyHistory", /\b(family history|mother|father|parent|sibling|brother|sister|grandparent|runs in the family|family|hereditary|genetic)\b/i],
+          ["allergies", /\b(allergy|allergic|allergies|reaction to|rash after|anaphylaxis|penicillin|latex|shellfish|peanut|drug allergy|shrimp|crab|egg|milk)\b/i],
+          ["timeframe", /\b(today|yesterday|last night|this morning|for \d+|since|started|began|onset|duration|week|weeks|month|months|day|days|hour|hours|year|years|acute|chronic)\b/i],
+          ["mainComplaints", /\b(complain|complaint|complained|pain|fever|cough|shortness of breath|breathless|dizzy|nausea|vomit|diarrhea|headache|chest|abdominal|rash|swelling|bleeding|fatigue|weakness)\b/i]
+        ]
+      },
+      ms: {
+        recognitionLang: "ms-MY",
+        fullStop: /\b(noktah|titik\s+perhentian|titik|berhenti)\b/gi,
+        comma: /\bkoma\b/gi,
+        questionMark: /\b(tanda\s+soal|tanda\s+tanya)\b/gi,
+        newLine: /\b(baris\s+baru|perenggan\s+baru|ayat\s+baru)\b/gi,
+        medicalContext: /\b(pesakit|sejarah|simptom|gejala|alahan|alah|ubat|ubatan|sakit|demam|batuk|ruam|bengkak|berdarah|pendarahan|letih|keletihan|lemah|sesak|nafas|loya|muntah|cirit-birit|cirit\s*birit|sakit\s+kepala|dada|abdomen|perut)\b/i,
+        listConnectors: /\b(dan|serta|juga|dengan|kemudian)\b/i,
+        listConnectorsReplace: /\b(?:dan|serta)\s+/gi,
+        timePhrase: /\b(sudah|untuk|sejak|lama|hari|minggu|bulan|tahun|hari\s+ini|semalam|pagi|malam)\b/i,
+        familyWords: /\b(ibu|bapa|ayah|ibu\s*bapa|adik|beradik|abang|kakak|datuk|nenek|keluarga|sejarah)\b/i,
+        timeBoundaryReplace: /\b(?:untuk|sejak|sudah|ada|sejarah)\b/gi,
+        sentenceBoundaryLookahead: /([a-z0-9])\s+(?=(?:ini|pesakit|simptom|gejala|sejarah|alahan|alah|ubat|ubatan|sakit|demam|batuk|ruam|bengkak|berdarah|pendarahan|letih|keletihan|lemah|sesak|nafas|loya|muntah|dada|abdomen|perut)\b)/gi,
+        looksLikeSentence: /\b(ada|pernah|adalah|kata|melaporkan|mengadu|bermula|mula|sejak|untuk|dengan|selepas|sebelum|hari\s+ini|semalam|pagi\s+ini|malam\s+tadi|rasa)\b/i,
+        hasClearEnding: /\b(mengadu|aduan|sejarah|simptom|gejala|alahan|ubat|sakit|demam|batuk|ruam|bengkak|berdarah|pendarahan|letih|lemah|sakit\s+kepala|dada|abdomen|perut|hari\s+ini|semalam|pagi\s+ini|malam\s+tadi)\b/i,
+        endsWithSymptom: /\b(sakit|demam|batuk|ruam|bengkak|berdarah|pendarahan|letih|lemah|sakit\s+kepala|dada|abdomen|perut|loya|muntah|cirit-birit|simptom|gejala|alahan|sejarah)\b$/i,
+        naturalBoundary: /\b(dan|tetapi|namun|juga|kemudian|hari\s+ini|semalam|pagi\s+ini|malam\s+tadi|sudah|untuk|sejak)\b/i,
+        naturalBoundaryFamily: /\b(mengadu|aduan|sejarah|simptom|gejala|alahan|ubat|ibu|bapa|ayah|adik|beradik)\b/i,
+        timeBoundary: /\b(sudah|untuk|sejak|hari|minggu|bulan|tahun|hari\s+ini|semalam|pagi\s+ini|malam\s+tadi)\b/i,
+        familyBoundary: /\b(ibu|bapa|ayah|adik|beradik|abang|kakak|datuk|nenek|keluarga)\b/i,
+        categoryRules: [
+          ["familyHistory", /\b(sejarah\s+keluarga|ibu|bapa|ayah|ibu\s*bapa|adik|beradik|abang|kakak|datuk|nenek|keluarga|baka|genetik|warisan)\b/i],
+          ["allergies", /\b(alahan|alah|reaksi|gatal-gatal|anafilaksis|penisilin|lateks|kerang|kacang|udang|ketam|telur|susu)\b/i],
+          ["timeframe", /\b(hari\s+ini|semalam|malam\s+tadi|pagi\s+ini|selama|sejak|bermula|mula|tempoh|minggu|bulan|hari|jam|tahun|akut|kronik)\b/i],
+          ["mainComplaints", /\b(mengadu|aduan|sakit|demam|batuk|sesak\s+nafas|pening|loya|muntah|cirit-birit|sakit\s+kepala|dada|abdomen|perut|ruam|bengkak|berdarah|pendarahan|letih|lemah)\b/i]
+        ]
+      }
+    };
+
+    function currentLangCode() {
+      return els.languageSelect && els.languageSelect.value === "ms" ? "ms" : "en";
+    }
+
+    function currentLangPack() {
+      return LANG_PACKS[currentLangCode()];
+    }
+
+    function updateLanguageHint() {
+      if (!els.languageHint) return;
+      if (currentLangCode() === "ms") {
+        els.languageHint.textContent = "Malay speech recognition works best in Chrome. If it stops mid-sentence in another browser, try Chrome or type/edit manually.";
+      } else {
+        els.languageHint.textContent = "";
+      }
+    }
+
+    function applySpeechPunctuation(text, pack = currentLangPack()) {
       if (!text) return "";
 
       let formatted = text.replace(/\s+/g, " ").trim();
-      formatted = formatted.replace(/\b(full\s+stop|fullstop|period|stop)\b/gi, ".");
-      formatted = formatted.replace(/\bcomma\b/gi, ",");
-      formatted = formatted.replace(/\b(question\s+mark|questionmark)\b/gi, "?");
-      formatted = formatted.replace(/\b(new\s+line|new\s+paragraph)\b/gi, "\n");
+      formatted = formatted.replace(pack.fullStop, ".");
+      formatted = formatted.replace(pack.comma, ",");
+      formatted = formatted.replace(pack.questionMark, "?");
+      formatted = formatted.replace(pack.newLine, "\n");
       formatted = formatted.replace(/([.?,;:]){2,}/g, "$1");
       formatted = formatted.replace(/\s+([,.;:?!])/g, "$1");
 
       const lower = formatted.toLowerCase();
       const hasExistingPunctuation = /[.!?,;:]/.test(formatted);
-      const hasMedicalContext = /\b(patient|history|symptoms|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b/i.test(lower);
+      const hasMedicalContext = pack.medicalContext.test(lower);
       const wordCount = formatted.split(/\s+/).filter(Boolean).length;
-      const looksLikeList = /\b(and|plus|also|with|then)\b/i.test(lower) && wordCount >= 3;
-      const looksLikeTimePhrase = /\b(already|for|since|long|time|days|day|week|weeks|month|months|years|year|today|yesterday|morning|night)\b/i.test(lower) && wordCount >= 4;
-      const looksLikeFamilyHistory = /\b(mother|father|parent|sibling|brother|sister|grandparent|family|history)\b/i.test(lower) && wordCount >= 4;
+      const looksLikeList = pack.listConnectors.test(lower) && wordCount >= 3;
+      const looksLikeTimePhrase = pack.timePhrase.test(lower) && wordCount >= 4;
+      const looksLikeFamilyHistory = pack.familyWords.test(lower) && wordCount >= 4;
 
       if (!hasExistingPunctuation && hasMedicalContext && wordCount >= 3) {
-        const listParts = formatted.split(/\s+(?:and|plus)\s+/i);
+        const listParts = formatted.split(pack.listConnectorsReplace);
         if (listParts.length >= 3) {
           formatted = listParts.join(", ");
         }
       }
 
       if (!hasExistingPunctuation && looksLikeList && wordCount >= 4) {
-        formatted = formatted.replace(/\b(?:and|plus)\s+/gi, ", ");
+        formatted = formatted.replace(pack.listConnectorsReplace, ", ");
       }
 
       if (!hasExistingPunctuation && (looksLikeTimePhrase || looksLikeFamilyHistory)) {
-        formatted = formatted.replace(/\b(?:for|since|already|has|have|history)\b/gi, (match) => `${match} `);
+        formatted = formatted.replace(pack.timeBoundaryReplace, (match) => `${match} `);
       }
 
-      formatted = formatted.replace(/([a-z0-9])\s+(?=(?:the|this|patient|symptoms|history|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b)/gi, "$1. ");
+      formatted = formatted.replace(pack.sentenceBoundaryLookahead, "$1. ");
       formatted = formatted.replace(/\s{2,}/g, " ").trim();
       return formatted;
     }
 
-    function finalizeSpeechPunctuation(text) {
+    function finalizeSpeechPunctuation(text, pack = currentLangPack()) {
       if (!text) return "";
 
       const cleaned = text.replace(/\s+/g, " ").trim();
@@ -1036,13 +1155,13 @@
       const words = lastSegment.split(/\s+/).filter(Boolean);
       const wordCount = words.length;
       const lower = lastSegment.toLowerCase();
-      const hasMedicalContext = /\b(patient|history|symptoms|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b/i.test(lower);
-      const looksLikeSentence = /\b(has|had|was|were|is|are|says|reported|complains|presents|presenting|started|began|since|for|with|after|before|today|yesterday|this morning|last night|feeling)\b/i.test(lower);
-      const hasClearEnding = /\b(complains|complaint|history|symptoms|allergies|medication|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|today|yesterday|this morning|last night)\b/i.test(lower);
-      const endsWithMedicalSymptom = /\b(pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|headache|chest|abdominal|nausea|vomiting|diarrhea|shortness|breath|symptoms|allergies|history)\b$/i.test(lower);
-      const hasNaturalBoundary = /\b(and|but|however|also|then|today|yesterday|this morning|last night|already|for|since)\b/i.test(lower) || /\b(complains|complaint|history|symptoms|allergies|medication|mother|father|parent|sibling)\b/i.test(lower);
-      const hasTimeBoundary = /\b(already|for|since|days|day|week|weeks|month|months|years|year|today|yesterday|this morning|last night)\b/i.test(lower) && wordCount >= 5;
-      const hasFamilyBoundary = /\b(mother|father|parent|sibling|brother|sister|grandparent|family)\b/i.test(lower) && wordCount >= 4;
+      const hasMedicalContext = pack.medicalContext.test(lower);
+      const looksLikeSentence = pack.looksLikeSentence.test(lower);
+      const hasClearEnding = pack.hasClearEnding.test(lower);
+      const endsWithMedicalSymptom = pack.endsWithSymptom.test(lower);
+      const hasNaturalBoundary = pack.naturalBoundary.test(lower) || pack.naturalBoundaryFamily.test(lower);
+      const hasTimeBoundary = pack.timeBoundary.test(lower) && wordCount >= 5;
+      const hasFamilyBoundary = pack.familyBoundary.test(lower) && wordCount >= 4;
       const hasStrongClause = (wordCount >= 4 && hasMedicalContext && hasClearEnding && !endsWithMedicalSymptom) || (wordCount >= 5 && hasMedicalContext && looksLikeSentence && !endsWithMedicalSymptom) || (wordCount >= 6 && hasMedicalContext && hasNaturalBoundary && !endsWithMedicalSymptom) || (wordCount >= 5 && (hasTimeBoundary || hasFamilyBoundary) && !endsWithMedicalSymptom);
 
       if (!hasExistingPunctuation && hasStrongClause) {
@@ -1108,7 +1227,8 @@
       recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
-      recognition.lang = navigator.language || "en-US";
+      recognition.lang = currentLangPack().recognitionLang;
+      updateLanguageHint();
 
       recognition.onstart = () => {
         isRecording = true;
@@ -1116,6 +1236,7 @@
         els.recordStatus.textContent = "Recording";
         els.recordBtn.disabled = true;
         els.stopBtn.disabled = false;
+        els.languageSelect.disabled = true;
         ensureDraftTime();
       };
 
@@ -1125,6 +1246,7 @@
         els.recordStatus.textContent = "Recording stopped";
         els.recordBtn.disabled = false;
         els.stopBtn.disabled = true;
+        els.languageSelect.disabled = false;
         if (speechPunctuationState.timer) {
           window.clearTimeout(speechPunctuationState.timer);
         }
@@ -1234,7 +1356,7 @@
       const allergyText = allergies.length ? allergies.join(", ") : "no known allergies";
       const timeframeText = timeframe.length ? timeframe.join(", ") : "unknown duration";
 
-      return `Patient complained ${complaintText}, for ${timeframeText}, with ${allergyText}`.trim();
+      return `Patient complained ${complaintText}, for ${timeframeText}, with ${allergyText} allergies`.trim();
     }
 
     function buildBriefProblemSummaryFromNote(note) {
@@ -1268,32 +1390,77 @@
       const allergyText = allergies.length ? allergies.join(", ") : "no known allergies";
       const timeframeText = timeframe.length ? timeframe.join(", ") : "unknown duration";
 
-      return `Patient complained ${complaintText}, for ${timeframeText}, with ${allergyText}`.trim();
+      return `Patient complained ${complaintText}, for ${timeframeText}, with ${allergyText} allergies`.trim();
     }
 
     function shortenSummaryText(text, bucket) {
+      const lang = currentLangCode();
+
       let phrase = text
         .replace(/\s+/g, " ")
         .replace(/^[^a-z0-9]+/i, "")
         .replace(/[.?!]+$/g, "")
         .trim();
 
-      phrase = phrase
-        .replace(/^(patient|the patient|he|she|his|her)\s+/i, "")
-        .replace(/^(complains of|complaint of|complained of|reports|states|has|had|is having|have|was having|presents with|presenting with|suffering from|is experiencing|experiencing)\s+/i, "")
-        .replace(/^(family history of|history of|allergies to|allergy to|allergic to|reaction to|symptoms of|symptom of)\s+/i, "")
-        .replace(/^(main complaint|complaint|symptoms|symptom)\s+/i, "")
-        .replace(/^(for|since|started|began|onset|duration|it has already started|already started)\s+/i, "")
-        .replace(/\b(?:and it has|and has|it has|it is|it was)\b/gi, "")
-        .replace(/\b(?:not reduced|not improved|not getting better|has not reduced|has not improved|has not gotten better|getting worse|worsening)\b/gi, "not improving")
-        .replace(/\b(?:for|since)\s+\d+\s*(days?|weeks?|months?|years?|hours?|minutes?)\b.*$/i, "")
-        .replace(/\b(?:today|yesterday|last night|this morning|ago)\b.*$/i, "")
-        .replace(/\b(?:started|began)\b\s+/i, "started ")
-        .replace(/^(to|of|with)\s+/i, "")
-        .replace(/\s+/g, " ")
-        .trim();
+      if (lang === "ms") {
+        phrase = phrase
+          .replace(/^(pesakit|beliau|dia)\s+/i, "")
+          .replace(/^(mengadu|mengalami|ada|pernah ada|menghidap|mempunyai)\s+/i, "")
+          .replace(/^(sejarah keluarga|sejarah|alahan terhadap|alahan|alah kepada|alah|gejala|simptom)\s+/i, "")
+          .replace(/^(untuk|sejak|bermula|mula|tempoh)\s+/i, "")
+          .replace(/\b(?:tidak berkurang|tidak semakin baik|semakin teruk|bertambah teruk)\b/gi, "tidak semakin baik")
+          .replace(/\b(?:untuk|sejak)\s+\d+\s*(hari|minggu|bulan|tahun|jam|minit)\b.*$/i, "")
+          .replace(/\b(?:hari ini|semalam|malam tadi|pagi ini|yang lalu)\b.*$/i, "")
+          .replace(/^(kepada|dengan)\s+/i, "")
+          .replace(/\s+/g, " ")
+          .trim();
+      } else {
+        phrase = phrase
+          .replace(/^(patient|the patient|he|she|his|her)\s+/i, "")
+          .replace(/^(complains of|complaint of|complained of|reports|states|has|had|is having|have|was having|presents with|presenting with|suffering from|is experiencing|experiencing)\s+/i, "")
+          .replace(/^(family history of|history of|allergies to|allergy to|allergic to|reaction to|symptoms of|symptom of)\s+/i, "")
+          .replace(/^(main complaint|complaint|symptoms|symptom)\s+/i, "")
+          .replace(/^(for|since|started|began|onset|duration|it has already started|already started)\s+/i, "")
+          .replace(/\b(?:and it has|and has|it has|it is|it was)\b/gi, "")
+          .replace(/\b(?:not reduced|not improved|not getting better|has not reduced|has not improved|has not gotten better|getting worse|worsening)\b/gi, "not improving")
+          .replace(/\b(?:for|since)\s+\d+\s*(days?|weeks?|months?|years?|hours?|minutes?)\b.*$/i, "")
+          .replace(/\b(?:today|yesterday|last night|this morning|ago)\b.*$/i, "")
+          .replace(/\b(?:started|began)\b\s+/i, "started ")
+          .replace(/^(to|of|with)\s+/i, "")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
 
       if (!phrase) return "";
+
+      if (lang === "ms") {
+        if (bucket === "familyHistory") {
+          const familyMatch = phrase.match(/^(ibu|bapa|ayah|adik|abang|kakak|datuk|nenek)\b/i);
+          if (familyMatch) {
+            const rest = phrase.replace(/^(ibu|bapa|ayah|adik|abang|kakak|datuk|nenek)\b\s*(ada|mempunyai)?\s*(sejarah)?\s*/i, "").trim();
+            return rest ? `${familyMatch[1]}: ${rest}` : `sejarah ${familyMatch[1]}`;
+          }
+          return phrase.replace(/^(sejarah keluarga|sejarah)\s+/i, "").trim();
+        }
+
+        if (bucket === "allergies") {
+          return phrase.replace(/^(alahan|alah)\s+/i, "").replace(/^(terhadap|kepada)\s+/i, "").trim();
+        }
+
+        if (bucket === "timeframe") {
+          const timeframeMatch = phrase.match(/\b(?:untuk|sejak)?\s*(\d+\s*(hari|minggu|bulan|tahun|jam|minit)|hari ini|semalam|malam tadi|pagi ini)\b/i);
+          if (timeframeMatch) {
+            const duration = timeframeMatch[0].trim();
+            return duration.length > 30 ? duration.split(/\s+/).slice(0, 4).join(" ") : duration;
+          }
+          if (/tidak semakin baik/i.test(phrase)) return "Tidak semakin baik";
+          if (/semakin baik/i.test(phrase)) return "Semakin baik";
+          if (/teruk/i.test(phrase)) return "Semakin teruk";
+          return phrase.length > 45 ? phrase.split(/\s+/).slice(0, 6).join(" ") : phrase;
+        }
+
+        return phrase.length > 45 ? phrase.split(/\s+/).slice(0, 6).join(" ") : phrase;
+      }
 
       if (bucket === "familyHistory") {
         const familyMatch = phrase.match(/^(mother|father|parent|sibling|brother|sister|grandparent)\b/i);
@@ -1378,12 +1545,7 @@
         otherKeynotes: []
       };
 
-      const rules = [
-        ["familyHistory", /\b(family history|mother|father|parent|sibling|brother|sister|grandparent|runs in the family|family|hereditary|genetic)\b/i],
-        ["allergies", /\b(allergy|allergic|allergies|reaction to|rash after|anaphylaxis|penicillin|latex|shellfish|peanut|drug allergy)\b/i],
-        ["timeframe", /\b(today|yesterday|last night|this morning|for \d+|since|started|began|onset|duration|week|weeks|month|months|day|days|hour|hours|year|years|acute|chronic)\b/i],
-        ["mainComplaints", /\b(complain|complaint|complained|pain|fever|cough|shortness of breath|breathless|dizzy|nausea|vomit|diarrhea|headache|chest|abdominal|rash|swelling|bleeding|fatigue|weakness)\b/i]
-      ];
+      const rules = currentLangPack().categoryRules;
 
       for (const sentence of splitSentences(text)) {
         let matched = false;
@@ -1462,15 +1624,24 @@
       }
 
       els.saveBtn.disabled = true;
-      els.recordStatus.textContent = "Saving to SharePoint...";
+      els.recordStatus.textContent = activeUser.mock ? "Saving test note locally..." : "Saving to SharePoint...";
       try {
-        const result = await syncNoteToSharePoint(note);
-        notesCache.unshift({ ...note, sharePointItemId: result.id || "" });
+        if (activeUser.mock) {
+          const stored = { ...note, sharePointItemId: note.id };
+          const all = readMockNotes();
+          all.unshift(stored);
+          writeMockNotes(all);
+          notesCache.unshift(stored);
+          els.recordStatus.textContent = "Test note saved locally (not sent to SharePoint)";
+        } else {
+          const result = await syncNoteToSharePoint(note);
+          notesCache.unshift({ ...note, sharePointItemId: result.id || "" });
+          els.recordStatus.textContent = "Note saved to SharePoint";
+        }
         renderHistory();
         clearDraft();
-        els.recordStatus.textContent = "Note saved to SharePoint";
       } catch (error) {
-        els.recordStatus.textContent = `Could not save to SharePoint: ${error.message}`;
+        els.recordStatus.textContent = `Could not save note: ${error.message}`;
       } finally {
         els.saveBtn.disabled = false;
       }
@@ -1478,6 +1649,13 @@
 
     async function refreshNotesFromSharePoint() {
       if (!activeUser) return;
+
+      if (activeUser.mock) {
+        notesCache = readMockNotes().filter((note) => note.userId === activeUser.id);
+        renderHistory();
+        return;
+      }
+
       els.history.innerHTML = '<div class="notice">Loading notes from SharePoint...</div>';
       try {
         notesCache = await fetchNotesFromSharePoint(activeUser.id);
@@ -1545,7 +1723,11 @@
       if (!confirmed) return;
 
       try {
-        await deleteNoteFromSharePoint(note.sharePointItemId);
+        if (activeUser.mock) {
+          writeMockNotes(readMockNotes().filter((item) => item.id !== id));
+        } else {
+          await deleteNoteFromSharePoint(note.sharePointItemId);
+        }
         notesCache = notesCache.filter((item) => item.id !== id);
         renderHistory();
         els.recordStatus.textContent = "Saved note deleted";
@@ -1750,20 +1932,32 @@
         els.microsoftSignInBtn.disabled = false;
       }
     });
+    els.mockSignInBtn.addEventListener("click", signInMock);
     els.switchUserBtn.addEventListener("click", async () => {
+      const wasMock = activeUser && activeUser.mock;
       clearDraft();
-      try {
-        await signOutMicrosoft();
-      } catch (error) {
-        console.error(error);
+      if (!wasMock) {
+        try {
+          await signOutMicrosoft();
+        } catch (error) {
+          console.error(error);
+        }
       }
       showLogin();
     });
     els.recordBtn.addEventListener("click", () => {
-      if (recognition && !isRecording) recognition.start();
+      if (recognition && !isRecording) {
+        recognition.lang = currentLangPack().recognitionLang;
+        recognition.start();
+      }
     });
     els.stopBtn.addEventListener("click", () => {
       if (recognition && isRecording) recognition.stop();
+    });
+    els.languageSelect.addEventListener("change", () => {
+      writeStore(speechLangKey, els.languageSelect.value);
+      if (recognition && !isRecording) recognition.lang = currentLangPack().recognitionLang;
+      updateLanguageHint();
     });
     els.clearBtn.addEventListener("click", clearDraft);
     els.categoriseBtn.addEventListener("click", () => {
@@ -1792,6 +1986,9 @@
     });
 
     async function init() {
+      const savedLang = readStore(speechLangKey, "en");
+      if (els.languageSelect && LANG_PACKS[savedLang]) els.languageSelect.value = savedLang;
+      updateLanguageHint();
       setupSpeech();
       hydrateGraphConfig();
       refreshLoginStep();
