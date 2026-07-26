@@ -1175,7 +1175,6 @@
         formatted = formatted.replace(pack.timeBoundaryReplace, (match) => `${match} `);
       }
 
-      formatted = formatted.replace(pack.sentenceBoundaryLookahead, "$1. ");
       formatted = formatted.replace(/\s{2,}/g, " ").trim();
       return formatted;
     }
