@@ -1478,7 +1478,9 @@
         if (bucket === "familyHistory") {
           const familyMatch = phrase.match(/^(ibu|bapa|ayah|adik|abang|kakak|datuk|nenek)\b/i);
           if (familyMatch) {
-            const rest = phrase.replace(/^(ibu|bapa|ayah|adik|abang|kakak|datuk|nenek)\b\s*(ada|mempunyai)?\s*(sejarah)?\s*/i, "").trim();
+            const rest = phrase
+              .replace(/^(ibu|bapa|ayah|adik|abang|kakak|datuk|nenek)\b\s*(saya|awak|anda|dia|kami|kita|mereka)?\s*(ada|mempunyai)?\s*(sejarah)?\s*/i, "")
+              .trim();
             return rest ? `${familyMatch[1]}: ${rest}` : `sejarah ${familyMatch[1]}`;
           }
           return phrase.replace(/^(sejarah keluarga|sejarah)\s+/i, "").trim();
@@ -1504,9 +1506,12 @@
       }
 
       if (bucket === "familyHistory") {
-        const familyMatch = phrase.match(/^(mother|father|parent|sibling|brother|sister|grandparent)\b/i);
+        const familyMatch = phrase.match(/^(?:(?:my|your|his|her|our|their)\s+)?(mother|father|parent|sibling|brother|sister|grandparent)\b/i);
         if (familyMatch) {
-          const rest = phrase.replace(/^(mother|father|parent|sibling|brother|sister|grandparent)\b\s*(has|have)?\s*(a\s*)?(history of)?\s*/i, "").trim();
+          const rest = phrase
+            .replace(/^(?:my|your|his|her|our|their)\s+/i, "")
+            .replace(/^(mother|father|parent|sibling|brother|sister|grandparent)\b\s*(has|have)?\s*(a\s*)?(history of)?\s*/i, "")
+            .trim();
           return rest ? `${familyMatch[1]}: ${rest}` : `${familyMatch[1]} history`;
         }
         return phrase.replace(/^(family history|history)\s+/i, "").replace(/^of\s+/i, "").trim();
