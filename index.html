@@ -614,7 +614,6 @@
       </div>
     </header>
 
-
     <section id="loginPanel" class="panel login">
       <div class="login-art">
         <h2>Record speech into structured patient notes.</h2>
@@ -1075,6 +1074,8 @@
         listConnectors: /\b(and|plus|also|with|then)\b/i,
         listConnectorsReplace: /\b(?:and|plus)\s+/gi,
         timePhrase: /\b(already|for|since|long|time|days|day|week|weeks|month|months|years|year|today|yesterday|morning|night)\b/i,
+        leadingConnector: /^(?:and|but|also|then|plus)\b[\s,]*/i,
+        clauseSplitter: /\s*,\s*|\s+(?:and|but|also|then|plus)\s+/gi,
         familyWords: /\b(mother|father|parent|sibling|brother|sister|grandparent|family|history)\b/i,
         timeBoundaryReplace: /\b(?:for|since|already|has|have|history)\b/gi,
         sentenceBoundaryLookahead: /([a-z0-9])\s+(?=(?:the|this|patient|symptoms|history|allergies|allergy|medication|medications|pain|fever|cough|rash|swelling|bleeding|fatigue|weakness|shortness|breath|nausea|vomiting|diarrhea|headache|chest|abdominal)\b)/gi,
@@ -1100,6 +1101,8 @@
         newLine: /\b(baris\s+baru|perenggan\s+baru|ayat\s+baru)\b/gi,
         medicalContext: /\b(pesakit|sejarah|simptom|gejala|alahan|alah|ubat|ubatan|sakit|demam|batuk|ruam|bengkak|berdarah|pendarahan|letih|keletihan|lemah|sesak|nafas|loya|muntah|cirit-birit|cirit\s*birit|sakit\s+kepala|dada|abdomen|perut)\b/i,
         listConnectors: /\b(dan|serta|juga|dengan|kemudian)\b/i,
+        leadingConnector: /^(?:dan|tetapi|namun|juga|kemudian|serta)\b[\s,]*/i,
+        clauseSplitter: /\s*,\s*|\s+(?:dan|tetapi|namun|juga|kemudian|serta)\s+/gi,
         listConnectorsReplace: /\b(?:dan|serta)\s+/gi,
         timePhrase: /\b(sudah|untuk|sejak|lama|hari|minggu|bulan|tahun|hari\s+ini|semalam|pagi|malam)\b/i,
         familyWords: /\b(ibu|bapa|ayah|ibu\s*bapa|adik|beradik|abang|kakak|datuk|nenek|keluarga|sejarah)\b/i,
@@ -1335,6 +1338,13 @@
         .replace(/\s+/g, " ")
         .match(/[^.!?\n-]+[.!?]?/g);
       return matches ? matches.map((part) => part.trim()).filter(Boolean) : [];
+    }
+
+    function splitIntoClauses(text, pack = currentLangPack()) {
+      return splitSentences(text)
+      .flatMap((sentence) => sentence.split(pack.clauseSplitter))
+      .map((clause) => clause.replace(pack.leadingConnector, "").trim())
+      .filter(Boolean);
     }
 
     function formatSummaryItems(items) {
@@ -1578,7 +1588,7 @@
 
       const rules = currentLangPack().categoryRules;
 
-      for (const sentence of splitSentences(text)) {
+      for (const sentence of splitIntoClauses(text)) {
         let matched = false;
         for (const [bucket, regex] of rules) {
           if (regex.test(sentence)) {
