@@ -1588,9 +1588,14 @@
 
       const rules = currentLangPack().categoryRules;
 
+      const pack = currentLangPack();
+
       for (const sentence of splitIntoClauses(text)) {
         let matched = false;
+        const isFamilyClause = pack.familyBoundary.test(sentence);
+
         for (const [bucket, regex] of rules) {
+          if (isFamilyClause && bucket !== "familyHistory") continue; // family-member clauses stay out of other buckets
           if (regex.test(sentence)) {
             const concise = shortenSummaryText(sentence, bucket);
             if (concise) buckets[bucket].push({ summary: concise, source: sentence });
