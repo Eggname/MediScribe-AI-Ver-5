@@ -1370,33 +1370,38 @@
       const normalizedText = text.replace(/\s+/g, " ").trim();
       if (!normalizedText) return "No transcript available yet.";
 
-      const complaintField = els.mainComplaints?.value || "";
-      const allergyField = els.allergies?.value || "";
-      const timeframeField = els.timeframe?.value || "";
+      // Helper function to extract valid bullet points (ignoring "Not specified")
+      const extractItems = (fieldValue) => {
+        if (!fieldValue) return [];
+        return fieldValue
+          .split(/\n/)
+          .map((line) => line.replace(/^•\s*/, "").trim())
+          .filter((line) => line && !line.toLowerCase().includes("not specified"))
+          .slice(0, 3);
+      };
 
-      const complaints = complaintField
-        .split(/\n/)
-        .map((line) => line.replace(/^•\s*/, "").trim())
-        .filter(Boolean)
-        .slice(0, 3);
+      const complaints = extractItems(els.mainComplaints?.value);
+      const allergies = extractItems(els.allergies?.value);
+      const timeframe = extractItems(els.timeframe?.value);
 
-      const allergies = allergyField
-        .split(/\n/)
-        .map((line) => line.replace(/^•\s*/, "").trim())
-        .filter(Boolean)
-        .slice(0, 3);
+      // Construct summary dynamically based on available data
+      let summary = "Patient complained";
+      
+      if (complaints.length) {
+        summary += ` ${complaints.join(", ")}`;
+      } else {
+        summary += " symptoms";
+      }
 
-      const timeframe = timeframeField
-        .split(/\n/)
-        .map((line) => line.replace(/^•\s*/, "").trim())
-        .filter(Boolean)
-        .slice(0, 3);
+      if (timeframe.length) {
+        summary += `, for ${timeframe.join(", ")}`;
+      }
 
-      const complaintText = complaints.length ? complaints.join(", ") : "symptoms";
-      const allergyText = allergies.length ? allergies.join(", ") : "no known allergies";
-      const timeframeText = timeframe.length ? timeframe.join(", ") : "unknown duration";
+      if (allergies.length) {
+        summary += `, with ${allergies.join(", ")} allergies`;
+      }
 
-      return `Patient complained ${complaintText}, for ${timeframeText}, with ${allergyText} allergies`.trim();
+      return summary.trim();
     }
 
     function buildBriefProblemSummaryFromNote(note) {
@@ -1404,33 +1409,37 @@
       if (directSummary.trim()) return directSummary.trim();
 
       const summary = note?.summary || {};
-      const complaintField = summary.mainComplaints || "";
-      const allergyField = summary.allergies || "";
-      const timeframeField = summary.timeframe || "";
 
-      const complaints = complaintField
-        .split(/\n/)
-        .map((line) => line.replace(/^•\s*/, "").trim())
-        .filter(Boolean)
-        .slice(0, 3);
+      const extractItems = (fieldValue) => {
+        if (!fieldValue) return [];
+        return fieldValue
+          .split(/\n/)
+          .map((line) => line.replace(/^•\s*/, "").trim())
+          .filter((line) => line && !line.toLowerCase().includes("not specified"))
+          .slice(0, 3);
+      };
 
-      const allergies = allergyField
-        .split(/\n/)
-        .map((line) => line.replace(/^•\s*/, "").trim())
-        .filter(Boolean)
-        .slice(0, 3);
+      const complaints = extractItems(summary.mainComplaints);
+      const allergies = extractItems(summary.allergies);
+      const timeframe = extractItems(summary.timeframe);
 
-      const timeframe = timeframeField
-        .split(/\n/)
-        .map((line) => line.replace(/^•\s*/, "").trim())
-        .filter(Boolean)
-        .slice(0, 3);
+      let result = "Patient complained";
 
-      const complaintText = complaints.length ? complaints.join(", ") : "symptoms";
-      const allergyText = allergies.length ? allergies.join(", ") : "no known allergies";
-      const timeframeText = timeframe.length ? timeframe.join(", ") : "unknown duration";
+      if (complaints.length) {
+        result += ` ${complaints.join(", ")}`;
+      } else {
+        result += " symptoms";
+      }
 
-      return `Patient complained ${complaintText}, for ${timeframeText}, with ${allergyText} allergies`.trim();
+      if (timeframe.length) {
+        result += `, for ${timeframe.join(", ")}`;
+      }
+
+      if (allergies.length) {
+        result += `, with ${allergies.join(", ")} allergies`;
+      }
+
+      return result.trim();
     }
 
     function shortenSummaryText(text, bucket) {
