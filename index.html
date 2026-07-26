@@ -1443,7 +1443,17 @@
     }
 
     function shortenSummaryText(text, bucket) {
-      const lang = currentLangCode();
+        const lang = currentLangCode();
+
+        // Fix for the timeframe extraction bug
+        if (bucket === "timeframe") {
+            const timeframeMatch = text.match(/\b\d+\s*(?:days?|weeks?|months?|years?|hours?|minutes?)\b/i) 
+                || text.match(/\b(?:today|yesterday|last night|this morning)\b/i);
+
+            if (timeframeMatch) {
+                return timeframeMatch[0].trim(); // Returns "3 days"
+            }
+        }
 
       let phrase = text
         .replace(/\s+/g, " ")
