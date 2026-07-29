@@ -399,7 +399,7 @@
 
     .category textarea {
       border: 0;
-      border-radius: 0 0 8px 8px;
+      border-radius: 0;
       min-height: 140px;
       flex: 1;
       box-shadow: none;
@@ -408,6 +408,64 @@
     .category.summary-active {
       border-color: var(--accent);
       box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.16);
+    }
+
+    .keyword-suggest {
+      display: flex;
+      gap: 6px;
+      padding: 8px;
+      border-top: 1px solid var(--line);
+      background: #f8faf9;
+    }
+
+    .keyword-suggest-input {
+      flex: 1;
+      min-width: 0;
+      min-height: 34px;
+      padding: 6px 8px;
+      font-size: 0.82rem;
+    }
+
+    .keyword-suggest-btn {
+      min-height: 34px;
+      padding: 0 10px;
+      font-size: 0.8rem;
+      white-space: nowrap;
+    }
+
+    .keyword-suggest-status {
+      padding: 0 10px 8px;
+      min-height: 1.1em;
+      color: var(--muted);
+      font-size: 0.74rem;
+      background: #f8faf9;
+    }
+
+    .keyword-suggest-status.learned {
+      color: var(--ok);
+      font-weight: 700;
+    }
+
+    .keyword-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      padding: 0 10px 8px;
+      background: #f8faf9;
+      border-radius: 0 0 8px 8px;
+    }
+
+    .keyword-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--accent-dark);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 0.7rem;
+      font-weight: 700;
     }
 
     .summary-source-panel {
@@ -728,18 +786,42 @@
           <article class="category">
             <h3>Family History</h3>
             <textarea id="familyHistory" data-category="familyHistory"></textarea>
+            <div class="keyword-chips" data-chips-for="familyHistory"></div>
+            <div class="keyword-suggest" data-suggest-category="familyHistory">
+              <input type="text" class="keyword-suggest-input" placeholder="Suggest a keyword…" maxlength="40">
+              <button type="button" class="ghost keyword-suggest-btn">Suggest</button>
+            </div>
+            <div class="keyword-suggest-status" data-status-for="familyHistory"></div>
           </article>
           <article class="category">
             <h3>Allergies</h3>
             <textarea id="allergies" data-category="allergies"></textarea>
+            <div class="keyword-chips" data-chips-for="allergies"></div>
+            <div class="keyword-suggest" data-suggest-category="allergies">
+              <input type="text" class="keyword-suggest-input" placeholder="Suggest a keyword…" maxlength="40">
+              <button type="button" class="ghost keyword-suggest-btn">Suggest</button>
+            </div>
+            <div class="keyword-suggest-status" data-status-for="allergies"></div>
           </article>
           <article class="category">
             <h3>Timeframe</h3>
             <textarea id="timeframe" data-category="timeframe"></textarea>
+            <div class="keyword-chips" data-chips-for="timeframe"></div>
+            <div class="keyword-suggest" data-suggest-category="timeframe">
+              <input type="text" class="keyword-suggest-input" placeholder="Suggest a keyword…" maxlength="40">
+              <button type="button" class="ghost keyword-suggest-btn">Suggest</button>
+            </div>
+            <div class="keyword-suggest-status" data-status-for="timeframe"></div>
           </article>
           <article class="category">
             <h3>Main Complaints</h3>
             <textarea id="mainComplaints" data-category="mainComplaints"></textarea>
+            <div class="keyword-chips" data-chips-for="mainComplaints"></div>
+            <div class="keyword-suggest" data-suggest-category="mainComplaints">
+              <input type="text" class="keyword-suggest-input" placeholder="Suggest a keyword…" maxlength="40">
+              <button type="button" class="ghost keyword-suggest-btn">Suggest</button>
+            </div>
+            <div class="keyword-suggest-status" data-status-for="mainComplaints"></div>
           </article>
           <article class="category">
             <h3>Other Keynotes</h3>
@@ -819,8 +901,13 @@
   </style>
 
   <script>
+    const keywordFlagsKey = "mediscribe.keywordFlags";
+    const KEYWORD_FLAG_THRESHOLD = 5; // Keyword is removed if flagged MORE than 5 times
     const graphConfigKey = "mediscribe.graphConfig";
     const speechLangKey = "mediscribe.speechLang";
+    const keywordSuggestionsKey = "mediscribe.keywordSuggestions";
+    const learnedKeywordsKey = "mediscribe.learnedKeywords";
+    const KEYWORD_SUGGESTION_THRESHOLD = 5; // a keyword needs to be suggested MORE than this many times to become active
     const msalScriptUrls = [
       "https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js",
       "https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js",
@@ -870,7 +957,8 @@
       allergies: document.getElementById("allergies"),
       timeframe: document.getElementById("timeframe"),
       mainComplaints: document.getElementById("mainComplaints"),
-      otherKeynotes: document.getElementById("otherKeynotes")
+      otherKeynotes: document.getElementById("otherKeynotes"),
+      keywordSuggestBlocks: document.querySelectorAll("[data-suggest-category]")
     };
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1647,6 +1735,199 @@
       });
     }
 
+    function getKeywordFlags() {
+      return readStore(keywordFlagsKey, {});
+      }
+
+    document.addEventListener("click", (event) => {
+      const flagBtn = event.target.closest(".flag-chip-btn");
+      if (flagBtn) {
+        const bucket = flagBtn.dataset.bucket;
+        const keyword = flagBtn.dataset.keyword;
+        flagKeyword(bucket, keyword);
+      }
+    });
+
+    function getRandomThreshold(min = 3, max = 8) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+    function flagKeyword(bucket, keyword) {
+      const langCode = currentLangCode();
+      const flags = getKeywordFlags();
+
+      flags[langCode] = flags[langCode] || {};
+      flags[langCode][bucket] = flags[langCode][bucket] || {};
+
+      let entry = flags[langCode][bucket][keyword];
+
+      // Initialize flag entry with a random threshold (3 to 8) if it doesn't exist
+      if (typeof entry === "number") {
+        entry = { count: entry, threshold: getRandomThreshold(3, 8) };
+      } else if (!entry) {
+        entry = { count: 0, threshold: getRandomThreshold(3, 8) };
+      }
+
+      // Increment flag count
+      entry.count += 1;
+      flags[langCode][bucket][keyword] = entry;
+      writeStore(keywordFlagsKey, flags);
+
+      const statusEl = document.querySelector(`[data-status-for="${bucket}"]`);
+
+      // Check if the random threshold for this word has been reached
+      if (entry.count >= entry.threshold) {
+        // 1. Remove keyword from learned keywords list
+        const learned = getLearnedKeywords();
+        if (learned[langCode]?.[bucket]) {
+          learned[langCode][bucket] = learned[langCode][bucket].filter((k) => k !== keyword);
+          writeStore(learnedKeywordsKey, learned);
+        }
+
+        // 2. Reset suggestion counter so it requires resuggestions to re-activate
+        const suggestions = getKeywordSuggestions();
+        if (suggestions[langCode]?.[bucket]?.[keyword] !== undefined) {
+          delete suggestions[langCode][bucket][keyword];
+          writeStore(keywordSuggestionsKey, suggestions);
+        }
+
+        // 3. Clean up flag data for this keyword
+        delete flags[langCode][bucket][keyword];
+        writeStore(keywordFlagsKey, flags);
+
+        if (statusEl) {
+          statusEl.classList.remove("learned");
+        }
+
+        // 4. Re-render chips & update live categorisation
+        renderKeywordChips(bucket);
+        lastTranscriptForCategories = "";
+        categoriseTranscript();
+      } else {
+        if (statusEl) {
+          statusEl.classList.remove("learned");
+        }
+        renderKeywordChips(bucket);
+      }
+    }
+
+    // ---- learned/suggested keywords: lets a user "vote" for a keyword to be ----
+    // ---- added to a category's matching rules; once a keyword has been ----
+    // ---- suggested more than KEYWORD_SUGGESTION_THRESHOLD times it becomes active ----
+    function escapeRegExp(value) {
+      return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+
+    function getKeywordSuggestions() {
+      return readStore(keywordSuggestionsKey, {});
+    }
+
+    function getLearnedKeywords() {
+      return readStore(learnedKeywordsKey, {});
+    }
+
+    function learnedKeywordsFor(bucket, langCode = currentLangCode()) {
+      const learned = getLearnedKeywords();
+      return (learned[langCode] && learned[langCode][bucket]) || [];
+    }
+
+    // A sentence matches a bucket if it hits the built-in regex OR any learned keyword.
+    function bucketMatches(sentence, bucket, regex, langCode) {
+      if (regex.test(sentence)) return true;
+      const learned = learnedKeywordsFor(bucket, langCode);
+      return learned.some((keyword) => new RegExp(`\\b${escapeRegExp(keyword)}\\b`, "i").test(sentence));
+    }
+
+    function renderKeywordChips(bucket) {
+      const container = document.querySelector(`[data-chips-for="${bucket}"]`);
+      if (!container) return;
+
+      const learned = learnedKeywordsFor(bucket);
+      const flags = getKeywordFlags()[currentLangCode()]?.[bucket] || {};
+
+      container.innerHTML = learned
+        .map((keyword) => {
+          const entry = flags[keyword];
+          const count = typeof entry === "object" ? entry.count : (entry || 0);
+          return `
+            <span class="keyword-chip" style="gap: 6px;">
+              ${escapeHtml(keyword)}
+              <button type="button" class="flag-chip-btn" data-bucket="${bucket}" data-keyword="${escapeHtml(keyword)}" style="background: none; border: none; color: var(--danger); padding: 0 2px; min-height: unset; cursor: pointer; font-size: 0.75rem;" title="Flag unwanted keyword">
+                🚩 ${count > 0 ? count : ''}
+              </button>
+            </span>`;
+        })
+        .join("");
+    }
+
+    function renderAllKeywordChips() {
+      categoryFields.forEach(([key]) => renderKeywordChips(key));
+    }
+
+    function suggestKeyword(bucket, rawKeyword) {
+      const keyword = rawKeyword.trim().toLowerCase();
+      const statusEl = document.querySelector(`[data-status-for="${bucket}"]`);
+      if (!keyword) return;
+
+      const langCode = currentLangCode();
+
+      const alreadyLearned = learnedKeywordsFor(bucket, langCode).includes(keyword);
+      if (alreadyLearned) {
+        if (statusEl) {
+          statusEl.textContent = `"${keyword}" is already an active keyword for this category.`;
+          statusEl.classList.add("learned");
+        }
+        return;
+      }
+
+      const suggestions = getKeywordSuggestions();
+      suggestions[langCode] = suggestions[langCode] || {};
+      suggestions[langCode][bucket] = suggestions[langCode][bucket] || {};
+      const count = (suggestions[langCode][bucket][keyword] || 0) + 1;
+      suggestions[langCode][bucket][keyword] = count;
+      writeStore(keywordSuggestionsKey, suggestions);
+
+      if (count > KEYWORD_SUGGESTION_THRESHOLD) {
+        const learned = getLearnedKeywords();
+        learned[langCode] = learned[langCode] || {};
+        learned[langCode][bucket] = learned[langCode][bucket] || [];
+        learned[langCode][bucket].push(keyword);
+        writeStore(learnedKeywordsKey, learned);
+
+        renderKeywordChips(bucket);
+        if (statusEl) {
+          //statusEl.textContent = `"${keyword}" reached ${count} suggestions and is now an active keyword.`;
+          statusEl.classList.add("learned");
+        }
+
+        // Force a re-categorisation so the new keyword is applied immediately.
+        lastTranscriptForCategories = "";
+        categoriseTranscript();
+      } else if (statusEl) {
+        //statusEl.textContent = `"${keyword}" suggested (${count}/${KEYWORD_SUGGESTION_THRESHOLD + 1}). It becomes active once suggested ${KEYWORD_SUGGESTION_THRESHOLD + 1} times.`;
+        statusEl.classList.remove("learned");
+      }
+    }
+
+    els.keywordSuggestBlocks.forEach((block) => {
+      const bucket = block.dataset.suggestCategory;
+      const input = block.querySelector(".keyword-suggest-input");
+      const button = block.querySelector(".keyword-suggest-btn");
+
+      const submit = () => {
+        suggestKeyword(bucket, input.value);
+        input.value = "";
+      };
+
+      button.addEventListener("click", submit);
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          submit();
+        }
+      });
+    });
+
     function categoriseTranscript() {
       const text = els.transcriptInput.value.trim();
       if (!text || text === lastTranscriptForCategories) return;
@@ -1663,6 +1944,7 @@
       const rules = currentLangPack().categoryRules;
 
       const pack = currentLangPack();
+      const langCode = currentLangCode();
 
       for (const sentence of splitIntoClauses(text)) {
         let matched = false;
@@ -1670,7 +1952,7 @@
 
         for (const [bucket, regex] of rules) {
           if (isFamilyClause && bucket !== "familyHistory") continue; // family-member clauses stay out of other buckets
-          if (regex.test(sentence)) {
+          if (bucketMatches(sentence, bucket, regex, langCode)) {
             const concise = shortenSummaryText(sentence, bucket);
             if (concise) buckets[bucket].push({ summary: concise, source: sentence });
             matched = true;
@@ -2078,6 +2360,7 @@
       writeStore(speechLangKey, els.languageSelect.value);
       if (recognition && !isRecording) recognition.lang = currentLangPack().recognitionLang;
       updateLanguageHint();
+      renderAllKeywordChips();
     });
     els.clearBtn.addEventListener("click", clearDraft);
     els.categoriseBtn.addEventListener("click", () => {
@@ -2111,6 +2394,7 @@
       updateLanguageHint();
       setupSpeech();
       setupSummaryHoverPreview();
+      renderAllKeywordChips();
       hydrateGraphConfig();
       refreshLoginStep();
       refreshGraphStatus();
@@ -2221,6 +2505,7 @@
           }
           spawnOne();
         }, 70);
+
       }
     })();
   </script>
